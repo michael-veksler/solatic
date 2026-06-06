@@ -1,0 +1,9 @@
+[package]
+name = "solatic"
+version = "0.1.0"
+edition = "2021"
+authors = ["solatic"]
+description = "Minimal CDCL SAT solver scaffold."
+license = "MIT"
+
+[dependencies]
