@@ -25,11 +25,11 @@ impl ClauseDb {
             .position(|&lit| lit == TERMINATOR)
             .expect("missing clause terminator")
             + start;
-        &self.pool[start..=end]
+        &self.pool[start..end] // ignore the terminator at `end`
     }
 
     pub fn is_empty_clause(&self, id: usize) -> bool {
-        self.clause(id).len() == 1
+        self.clause(id).len() == 0
     }
 }
 
@@ -59,5 +59,33 @@ impl Solver {
             }
         }
         Ok(SolveResult::Sat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clause_db() {
+        let mut db = ClauseDb::new();
+        let cl0 = [1, 2, 3, 4];
+        let cl1 = [-1, -2, -3];
+        let cl2 = [];
+        let cl3 = [-5];
+        db.add_clause(cl0.as_slice());
+        db.add_clause(cl1.as_slice());
+        db.add_clause(cl2.as_slice());
+        db.add_clause(cl3.as_slice());
+        assert_eq!(db.clause(0), &cl0);
+        assert_eq!(db.clause(1), &cl1);
+        assert_eq!(db.clause(2), &cl2);
+        assert_eq!(db.clause(3), &cl3);
+
+        let c4 = [5, 6];
+        db.add_clause(c4.as_slice());
+        assert_eq!(db.clause(4), &c4);
+        assert!(db.is_empty_clause(2));
+        assert!(! db.is_empty_clause(0));
     }
 }
