@@ -19,8 +19,8 @@ impl ClauseDb {
         self.pool.push(TERMINATOR);
     }
 
-    pub fn clause(&self, id: usize) -> &[Lit] {
-        let start = self.offsets[id];
+    pub fn clause(&self, id: ClauseId) -> &[Lit] {
+        let start = self.offsets[id as usize];
         let end = self.pool[start..]
             .iter()
             .position(|&lit| lit == TERMINATOR)
@@ -29,7 +29,7 @@ impl ClauseDb {
         &self.pool[start..end] // ignore the terminator at `end`
     }
 
-    pub fn is_empty_clause(&self, id: usize) -> bool {
+    pub fn is_empty_clause(&self, id: ClauseId) -> bool {
         self.clause(id).len() == 0
     }
 }
@@ -42,47 +42,56 @@ pub enum SolveResult {
 
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct Watch {
+struct Watcher {
     clause: ClauseId,
+    blocking_literal: Lit,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-struct WatchDb {
-    watches: Vec<Vec<Watch>>,
-    empty_watch: [Watch; 0],
+struct WatchersDb {
+    // FIXME: Vec<Watch> is not cache friendly.
+    //        Better have the size and cpacity in the same memory block with the first Watch.
+    //        Maybe use unsafe code to manage pointers, or use thin-vec  or thin-dst / erasable
+    pos_watchers: Vec<Vec<Watcher>>,
+    neg_watchers: Vec<Vec<Watcher>>,
+    empty_watch: [Watcher; 0],
 }
 
 
 #[allow(dead_code)]
-impl WatchDb {
+impl WatchersDb {
     pub fn new() -> Self {
         Self {
-            watches: Vec::new(),
+            pos_watchers: Vec::new(),
+            neg_watchers: Vec::new(),
             empty_watch: [],
         }
     }
-    pub fn watches(&self, lit: Lit) -> &[Watch] {
-        let idx = lit_index(lit).expect("invalid literal");
-        if idx < self.watches.len() {
-            &self.watches[idx]
+    pub fn watches(&self, lit: Lit) -> &[Watcher] {
+        let var = var_of(lit).expect("invalid literal");
+        let watchers = if is_pos(lit) { &self.pos_watchers} else { &self.neg_watchers };
+        if var < watchers.len() {
+            &watchers[var]
         } else {
             &self.empty_watch.as_slice()
         }
     }
-    pub fn update_watches(&mut self, lit: Lit) -> &mut Vec<Watch> {
-        let idx = lit_index(lit).expect("invalid literal");
-        if idx >= self.watches.len() {
-            self.watches.resize(idx + 1, Vec::new());
+    pub fn update_watches(&mut self, lit: Lit) -> &mut Vec<Watcher> {
+        let var = var_of(lit).expect("invalid literal");
+        let watchers = if is_pos(lit) { &mut self.pos_watchers} else { &mut self.neg_watchers };
+        if var >= watchers.len() {
+            watchers.resize(var + 1, Vec::new());
         }
-        &mut self.watches[idx]
+        &mut watchers[var]
     }
-    pub fn add_watch(&mut self, lit: Lit, watch: Watch) {
-        let idx = lit_index(lit).expect("invalid literal");
-        if idx >= self.watches.len() {
-            self.watches.resize(idx + 1, Vec::new());
+    pub fn add_watch(&mut self, lit: Lit, watch: Watcher) {
+        let var = var_of(lit).expect("invalid literal");
+        let watchers = if is_pos(lit) { &mut self.pos_watchers} else { &mut self.neg_watchers };
+        if var >= watchers.len() {
+            watchers.resize(var + 1, Vec::new());
         }
-        self.watches[idx].push(watch);
+        watchers[var].push(watch);
     }
 }
 
@@ -100,14 +109,6 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0 
 }
 
-/// Map a literal to its watch list index.
-///
-/// Literals are stored as `+v` or `-v`, and the watch arrays use a dense
-/// index per signed literal.
-fn lit_index(lit: Lit) -> Option<usize> {
-    var_of(lit).map(|var| (var - 1) * 2 + if is_pos(lit) { 0 } else { 1 })
-}
-
 pub struct Solver {
     db: ClauseDb,
 }
@@ -123,7 +124,7 @@ impl Solver {
 
     pub fn solve(&self) -> Result<SolveResult, String> {
         for id in 0..self.db.offsets.len() {
-            if self.db.is_empty_clause(id) {
+            if self.db.is_empty_clause(id as ClauseId) {
                 return Ok(SolveResult::Unsat);
             }
         }
@@ -160,18 +161,21 @@ mod tests {
 
     #[test]
     fn test_watch_db() {
-        let mut db = WatchDb::new();
+        let mut db = WatchersDb::new();
         assert!(db.watches(1).is_empty());
         assert!(db.watches(-1).is_empty());
 
-        db.add_watch(1, Watch { clause: 0 });
-        db.add_watch(-1, Watch { clause: 1 });
-        db.add_watch(1, Watch { clause: 2 });
+        db.add_watch(1, Watcher { clause: 0, blocking_literal: 1 });
+        db.add_watch(-1, Watcher { clause: 1, blocking_literal: -1 });
+        db.add_watch(1, Watcher { clause: 2, blocking_literal: 3 });
 
-        assert_eq!(db.watches(1), &[Watch { clause: 0 }, Watch { clause: 2 }]);
-        assert_eq!(db.watches(-1), &[Watch { clause: 1 }]);
+        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 }, 
+                                    Watcher { clause: 2, blocking_literal: 3 }]);
+        assert_eq!(db.watches(-1), &[Watcher { clause: 1, blocking_literal: -1 }]);
 
-        db.update_watches(1).push(Watch { clause: 3 });
-        assert_eq!(db.watches(1), &[Watch { clause: 0 }, Watch { clause: 2 }, Watch { clause: 3 }]);
+        db.update_watches(1).push(Watcher { clause: 3, blocking_literal: -8 });
+        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 }, 
+                                    Watcher { clause: 2, blocking_literal: 3 }, 
+                                    Watcher { clause: 3, blocking_literal: -8 }]);
     }
 }
