@@ -1,6 +1,5 @@
 pub type Lit = i32;
 pub type ClauseId = u32;
-pub const TERMINATOR: Lit = 0;
 
 #[derive(Debug)]
 pub struct ClauseDb {
@@ -15,22 +14,26 @@ impl ClauseDb {
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
         self.offsets.push(self.pool.len());
+        let stored_size: Lit = lits.len().try_into().expect("clause too long");
+        self.pool.push(stored_size);
         self.pool.extend_from_slice(lits);
-        self.pool.push(TERMINATOR);
+    }
+
+    fn clause_bounds(&self, id: ClauseId) -> (usize, usize) {
+        let header_pos = self.offsets[id as usize];
+        let size = self.pool[header_pos] as usize;
+        let begin = header_pos + 1;
+        let end = begin + size;
+        (begin, end)
     }
 
     pub fn clause(&self, id: ClauseId) -> &[Lit] {
-        let start = self.offsets[id as usize];
-        let end = self.pool[start..]
-            .iter()
-            .position(|&lit| lit == TERMINATOR)
-            .expect("missing clause terminator")
-            + start;
-        &self.pool[start..end] // ignore the terminator at `end`
+        let (begin, end) = self.clause_bounds(id);
+        &self.pool[begin..end]
     }
-
-    pub fn is_empty_clause(&self, id: ClauseId) -> bool {
-        self.clause(id).len() == 0
+    pub fn clause_mut(&mut self, id: ClauseId) -> &mut [Lit] {
+        let (begin, end) = self.clause_bounds(id);
+        &mut self.pool[begin..end]
     }
 }
 
@@ -69,17 +72,17 @@ impl WatchersDb {
         }
     }
     pub fn watches(&self, lit: Lit) -> &[Watcher] {
-        let var = var_of(lit).expect("invalid literal");
+        let var = var_of(lit).expect("invalid literal") as usize;
         let watchers = if is_pos(lit) { &self.pos_watchers} else { &self.neg_watchers };
-        if var < watchers.len() {
-            &watchers[var]
-        } else {
-            &self.empty_watch.as_slice()
-        }
+        watchers.get(var).map(|w| w.as_slice()).unwrap_or(&self.empty_watch)
     }
     pub fn update_watches(&mut self, lit: Lit) -> &mut Vec<Watcher> {
-        let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) { &mut self.pos_watchers} else { &mut self.neg_watchers };
+        let var = var_of(lit).expect("invalid literal") as usize;
+        let watchers = if is_pos(lit) {
+            &mut self.pos_watchers
+        } else { 
+            &mut self.neg_watchers
+        };
         if var >= watchers.len() {
             watchers.resize(var + 1, Vec::new());
         }
@@ -87,7 +90,11 @@ impl WatchersDb {
     }
     pub fn add_watch(&mut self, lit: Lit, watch: Watcher) {
         let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) { &mut self.pos_watchers} else { &mut self.neg_watchers };
+        let watchers = if is_pos(lit) { 
+            &mut self.pos_watchers
+        } else { 
+            &mut self.neg_watchers 
+        }; 
         if var >= watchers.len() {
             watchers.resize(var + 1, Vec::new());
         }
@@ -100,7 +107,7 @@ fn var_of(lit: Lit) -> Option<usize> {
     if lit == 0 {
         None
     } else {
-        Some(lit.abs() as usize)
+        Some(lit.abs() as usize - 1)
     }
 }
 
@@ -110,21 +117,23 @@ fn is_pos(lit: Lit) -> bool {
 }
 
 pub struct Solver {
-    db: ClauseDb,
+    clauses: ClauseDb,
 }
 
 impl Solver {
     pub fn new() -> Self {
-        Self { db: ClauseDb::new() }
+        Self {
+            clauses: ClauseDb::new(),
+        }
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
-        self.db.add_clause(lits);
+        self.clauses.add_clause(lits);
     }
 
     pub fn solve(&self) -> Result<SolveResult, String> {
-        for id in 0..self.db.offsets.len() {
-            if self.db.is_empty_clause(id as ClauseId) {
+        for id in 0..self.clauses.offsets.len() {
+            if self.clauses.clause(id as ClauseId).is_empty() {
                 return Ok(SolveResult::Unsat);
             }
         }
@@ -155,8 +164,11 @@ mod tests {
         let c4 = [5, 6];
         db.add_clause(c4.as_slice());
         assert_eq!(db.clause(4), &c4);
-        assert!(db.is_empty_clause(2));
-        assert!(! db.is_empty_clause(0));
+        assert!(db.clause(2).is_empty());
+        assert!(db.clause(0).len() > 0);
+
+        db.clause_mut(4)[0] = 8;
+        assert_eq!(db.clause(4), &[8, 6]);
     }
 
     #[test]

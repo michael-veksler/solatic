@@ -1,3 +1,3 @@
 pub mod solver;
 
-pub use solver::{ClauseDb, Lit, Solver, SolveResult, TERMINATOR};
+pub use solver::{ClauseDb, Lit, Solver, SolveResult};
