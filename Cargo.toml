@@ -7,3 +7,4 @@ description = "Minimal CDCL SAT solver scaffold."
 license = "MIT"
 
 [dependencies]
+bitflags = "2.12"
