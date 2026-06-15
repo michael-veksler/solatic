@@ -1,3 +1,5 @@
+use bitflags::bitflags;
+
 pub type Lit = i32;
 pub type ClauseId = u32;
 
@@ -10,6 +12,10 @@ pub struct ClauseDb {
 impl ClauseDb {
     pub fn new() -> Self {
         Self { pool: Vec::new(), offsets: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.offsets.len()
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
@@ -34,6 +40,30 @@ impl ClauseDb {
     pub fn clause_mut(&mut self, id: ClauseId) -> &mut [Lit] {
         let (begin, end) = self.clause_bounds(id);
         &mut self.pool[begin..end]
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Assignment : u8 {
+        const NEGATIVE = 1 << 0;
+        const POSITIVE = 1 << 1;
+        const UNASSIGNED = Self::NEGATIVE.bits() | Self::POSITIVE.bits();
+    }
+}
+
+impl Assignment {
+    pub fn is_unassigned(self) -> bool {
+        self == (Assignment::NEGATIVE | Assignment::POSITIVE)
+    }
+    pub fn negated(self) -> Assignment {
+        let has_positive = self.contains(Assignment::POSITIVE);
+        let has_negative = self.contains(Assignment::NEGATIVE);
+        if has_negative == has_positive {
+            self
+        } else {
+            self ^ Assignment::UNASSIGNED
+        }
     }
 }
 
@@ -80,7 +110,7 @@ impl WatchersDb {
         let var = var_of(lit).expect("invalid literal") as usize;
         let watchers = if is_pos(lit) {
             &mut self.pos_watchers
-        } else { 
+        } else {
             &mut self.neg_watchers
         };
         if var >= watchers.len() {
@@ -90,11 +120,11 @@ impl WatchersDb {
     }
     pub fn add_watch(&mut self, lit: Lit, watch: Watcher) {
         let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) { 
+        let watchers = if is_pos(lit) {
             &mut self.pos_watchers
-        } else { 
-            &mut self.neg_watchers 
-        }; 
+        } else {
+            &mut self.neg_watchers
+        };
         if var >= watchers.len() {
             watchers.resize(var + 1, Vec::new());
         }
@@ -103,41 +133,110 @@ impl WatchersDb {
 }
 
 /// Return the variable id for a literal.
-fn var_of(lit: Lit) -> Option<usize> { 
+fn var_of(lit: Lit) -> Option<usize> {
     if lit == 0 {
         None
     } else {
-        Some(lit.abs() as usize - 1)
+        Some(lit.abs() as usize)
     }
 }
 
 /// Return true when a literal is positive.
-fn is_pos(lit: Lit) -> bool { 
-    lit > 0 
+fn is_pos(lit: Lit) -> bool {
+    lit > 0
 }
 
 pub struct Solver {
     clauses: ClauseDb,
+    assigns: Vec<Assignment>,
+}
+
+pub enum ClauseStatus {
+    Satisfied,
+    Conflict,
+    NeedReplacement,
 }
 
 impl Solver {
     pub fn new() -> Self {
         Self {
             clauses: ClauseDb::new(),
+            assigns: Vec::new(),
+        }
+    }
+
+    fn ensure_vars(&mut self, var: usize) {
+        if var >= self.assigns.len() {
+            self.assigns.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
         }
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
+        let opt_max_var: Option<usize> = lits.iter()
+                          .map(|&lit| var_of(lit).unwrap_or(0))
+                          .max();
+        if let Some(max_var) = opt_max_var {
+            self.ensure_vars(max_var);
+        }
         self.clauses.add_clause(lits);
     }
 
-    pub fn solve(&self) -> Result<SolveResult, String> {
-        for id in 0..self.clauses.offsets.len() {
-            if self.clauses.clause(id as ClauseId).is_empty() {
-                return Ok(SolveResult::Unsat);
-            }
+    fn literal_state(&self, lit: Lit) -> Assignment {
+        let var = var_of(lit).expect("invalid literal");
+        let assignment = self.assigns[var];
+        if is_pos(lit) {
+            assignment
+        } else {
+            assignment.negated()
         }
-        Ok(SolveResult::Sat)
+    }
+
+    fn is_valid_assignment(&self) -> bool {
+        (0..self.clauses.len()).all(|clause_id| {
+            let clause = self.clauses.clause(clause_id as ClauseId);
+            clause.iter().any(|&lit| self.literal_state(lit) == Assignment::POSITIVE)
+        })
+    }
+
+    fn find_first_unassigned_var(&self, start: usize) -> usize {
+        (start..self.assigns.len()).find(|&i| self.assigns[i].is_unassigned()).unwrap_or(self.assigns.len())
+    }
+
+    fn try_all_assignments(&mut self, first_var_to_try: usize) -> bool {
+        let var = self.find_first_unassigned_var(first_var_to_try);
+        if var >= self.assigns.len() {
+            return self.is_valid_assignment();
+        }
+        self.assigns[var] = Assignment::POSITIVE;
+        if self.try_all_assignments(var+1) {
+            return true;
+        }
+        self.assigns[var] = Assignment::NEGATIVE;
+        if self.try_all_assignments(var+1) {
+            return true;
+        }
+        self.assigns[var] = Assignment::UNASSIGNED;
+        false
+    }
+
+    /// Query the current assignment of a variable.
+    pub fn value_of(&self, var: usize) -> Option<bool> {
+        if var as usize >= self.assigns.len() {
+            None
+        } else {
+            Some(self.assigns[var as usize] == Assignment::POSITIVE)
+        }
+    }
+
+    /// Solve the current formula using propagation only.
+    ///
+    /// Returns `Unsat` if an empty clause or conflict is detected.
+    pub fn solve(&mut self) -> SolveResult {
+        if self.try_all_assignments(0) {
+            SolveResult::Sat
+        } else {
+            SolveResult::Unsat
+        }
     }
 }
 
@@ -181,13 +280,13 @@ mod tests {
         db.add_watch(-1, Watcher { clause: 1, blocking_literal: -1 });
         db.add_watch(1, Watcher { clause: 2, blocking_literal: 3 });
 
-        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 }, 
+        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 },
                                     Watcher { clause: 2, blocking_literal: 3 }]);
         assert_eq!(db.watches(-1), &[Watcher { clause: 1, blocking_literal: -1 }]);
 
         db.update_watches(1).push(Watcher { clause: 3, blocking_literal: -8 });
-        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 }, 
-                                    Watcher { clause: 2, blocking_literal: 3 }, 
+        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 },
+                                    Watcher { clause: 2, blocking_literal: 3 },
                                     Watcher { clause: 3, blocking_literal: -8 }]);
     }
 }
