@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use std::io;
 
 pub type Lit = i32;
 pub type ClauseId = u32;
@@ -37,6 +38,7 @@ impl ClauseDb {
         let (begin, end) = self.clause_bounds(id);
         &self.pool[begin..end]
     }
+    #[allow(dead_code)]
     pub fn clause_mut(&mut self, id: ClauseId) -> &mut [Lit] {
         let (begin, end) = self.clause_bounds(id);
         &mut self.pool[begin..end]
@@ -84,7 +86,7 @@ struct Watcher {
 #[allow(dead_code)]
 struct WatchersDb {
     // FIXME: Vec<Watch> is not cache friendly.
-    //        Better have the size and cpacity in the same memory block with the first Watch.
+    //        Better have the size and capacity in the same memory block with the first Watch.
     //        Maybe use unsafe code to manage pointers, or use thin-vec  or thin-dst / erasable
     pos_watchers: Vec<Vec<Watcher>>,
     neg_watchers: Vec<Vec<Watcher>>,
@@ -151,12 +153,6 @@ pub struct Solver {
     assigns: Vec<Assignment>,
 }
 
-pub enum ClauseStatus {
-    Satisfied,
-    Conflict,
-    NeedReplacement,
-}
-
 impl Solver {
     pub fn new() -> Self {
         Self {
@@ -182,7 +178,7 @@ impl Solver {
     }
 
     fn literal_state(&self, lit: Lit) -> Assignment {
-        let var = var_of(lit).expect("invalid literal");
+        let var = var_of(lit).expect("invalid 0 literal");
         let assignment = self.assigns[var];
         if is_pos(lit) {
             assignment
@@ -219,12 +215,34 @@ impl Solver {
         false
     }
 
+    pub fn values_len(&self) -> usize {
+        self.assigns.len()
+    }
     /// Query the current assignment of a variable.
     pub fn value_of(&self, var: usize) -> Option<bool> {
         if var as usize >= self.assigns.len() {
             None
         } else {
             Some(self.assigns[var as usize] == Assignment::POSITIVE)
+        }
+    }
+    pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error>{
+        for var in 1..self.values_len() {
+            write!(writer, "V{var}=")?;
+            match self.value_of(var) {
+                None => writeln!(writer, "unset")?,
+                Some(val) => writeln!(writer, "{}", val as u32)?,
+            }
+        }
+        Ok(())
+    }
+    pub fn solve_and_write(&mut self, writer: &mut impl io::Write) -> Result<(), io::Error>{
+        match self.solve() {
+            SolveResult::Unsat => { writeln!(writer, "UNSAT") },
+            SolveResult::Sat => {
+                writeln!(writer, "SAT")?;
+                self.write_assignments(writer)
+            }
         }
     }
 

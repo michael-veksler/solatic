@@ -8,3 +8,5 @@ license = "MIT"
 
 [dependencies]
 bitflags = "2.12"
+anyhow = "1.0"
+rstest = "0.26.1"
