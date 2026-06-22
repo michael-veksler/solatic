@@ -20,7 +20,7 @@ pub fn from_reader(reader: impl BufRead) -> Result<Solver> {
             None => continue,
         }
     }
-    return Ok(solver);
+    Ok(solver)
 }
 
 fn parse_line(line: String) -> Result<Option<Vec<Lit>>> {
