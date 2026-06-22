@@ -1,4 +1,4 @@
-use solatic::{Solver, SolveResult};
+use solatic::{SolveResult, Solver};
 
 #[test]
 fn smoke_test() {
@@ -20,9 +20,9 @@ fn nontrivial_sat() {
 
     // first we create mutual implication v1 -> !v2 -> v3 -> v1
     // Remember the rule (a->b) is equivalent to (!a || b)
-    solver.add_clause(&[-1, -2]);  // v1 -> !v2
-    solver.add_clause(&[2, 3]);    // !v2 -> v3
-    solver.add_clause(&[-3, 1]);   // v3 -> v1
+    solver.add_clause(&[-1, -2]); // v1 -> !v2
+    solver.add_clause(&[2, 3]); // !v2 -> v3
+    solver.add_clause(&[-3, 1]); // v3 -> v1
 
     // now make it impossible to assign !v1, v2, !v3, leaving only v1, !v2, v3 as a solution
     solver.add_clause(&[1, -2, 3]);
@@ -39,9 +39,9 @@ fn conflict_is_unsat() {
 
     // first we create mutual implication v1 -> !v2 -> v3 -> v1
     // Remember the rule (a->b) is equivalent to (!a || b)
-    solver.add_clause(&[-1, -2]);  // v1 -> !v2
-    solver.add_clause(&[2, 3]);    // !v2 -> v3
-    solver.add_clause(&[-3, 1]);   // v3 -> v1
+    solver.add_clause(&[-1, -2]); // v1 -> !v2
+    solver.add_clause(&[2, 3]); // !v2 -> v3
+    solver.add_clause(&[-3, 1]); // v3 -> v1
 
     // now make it impossible to assign !v1, v2, !v3, leaving only v1, !v2, v3 as a solution
     solver.add_clause(&[1, -2, 3]);
