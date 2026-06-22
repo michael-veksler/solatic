@@ -1,4 +1,4 @@
 pub mod dimacs_parser;
 pub mod solver;
 
-pub use solver::{ClauseDb, Lit, Solver, SolveResult};
+pub use solver::{ClauseDb, Lit, SolveResult, Solver};

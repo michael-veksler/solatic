@@ -12,7 +12,10 @@ pub struct ClauseDb {
 
 impl ClauseDb {
     pub fn new() -> Self {
-        Self { pool: Vec::new(), offsets: Vec::new() }
+        Self {
+            pool: Vec::new(),
+            offsets: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -75,7 +78,6 @@ pub enum SolveResult {
     Unsat,
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct Watcher {
     clause: ClauseId,
@@ -92,7 +94,6 @@ struct WatchersDb {
     neg_watchers: Vec<Vec<Watcher>>,
     empty_watch: [Watcher; 0],
 }
-
 
 #[allow(dead_code)]
 impl WatchersDb {
@@ -168,9 +169,7 @@ impl Solver {
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
-        let opt_max_var: Option<usize> = lits.iter()
-                          .map(|&lit| var_of(lit).unwrap_or(0))
-                          .max();
+        let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.ensure_vars(max_var);
         }
@@ -190,12 +189,16 @@ impl Solver {
     fn is_valid_assignment(&self) -> bool {
         (0..self.clauses.len()).all(|clause_id| {
             let clause = self.clauses.clause(clause_id as ClauseId);
-            clause.iter().any(|&lit| self.literal_state(lit) == Assignment::POSITIVE)
+            clause
+                .iter()
+                .any(|&lit| self.literal_state(lit) == Assignment::POSITIVE)
         })
     }
 
     fn find_first_unassigned_var(&self, start: usize) -> usize {
-        (start..self.assigns.len()).find(|&i| self.assigns[i].is_unassigned()).unwrap_or(self.assigns.len())
+        (start..self.assigns.len())
+            .find(|&i| self.assigns[i].is_unassigned())
+            .unwrap_or(self.assigns.len())
     }
 
     fn try_all_assignments(&mut self, first_var_to_try: usize) -> bool {
@@ -204,11 +207,11 @@ impl Solver {
             return self.is_valid_assignment();
         }
         self.assigns[var] = Assignment::POSITIVE;
-        if self.try_all_assignments(var+1) {
+        if self.try_all_assignments(var + 1) {
             return true;
         }
         self.assigns[var] = Assignment::NEGATIVE;
-        if self.try_all_assignments(var+1) {
+        if self.try_all_assignments(var + 1) {
             return true;
         }
         self.assigns[var] = Assignment::UNASSIGNED;
@@ -226,7 +229,7 @@ impl Solver {
             Some(self.assigns[var as usize] == Assignment::POSITIVE)
         }
     }
-    pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error>{
+    pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error> {
         for var in 1..self.values_len() {
             write!(writer, "V{var}=")?;
             match self.value_of(var) {
@@ -236,9 +239,11 @@ impl Solver {
         }
         Ok(())
     }
-    pub fn solve_and_write(&mut self, writer: &mut impl io::Write) -> Result<(), io::Error>{
+    pub fn solve_and_write(&mut self, writer: &mut impl io::Write) -> Result<(), io::Error> {
         match self.solve() {
-            SolveResult::Unsat => { writeln!(writer, "UNSAT") },
+            SolveResult::Unsat => {
+                writeln!(writer, "UNSAT")
+            }
             SolveResult::Sat => {
                 writeln!(writer, "SAT")?;
                 self.write_assignments(writer)
@@ -294,17 +299,69 @@ mod tests {
         assert!(db.watches(1).is_empty());
         assert!(db.watches(-1).is_empty());
 
-        db.add_watch(1, Watcher { clause: 0, blocking_literal: 1 });
-        db.add_watch(-1, Watcher { clause: 1, blocking_literal: -1 });
-        db.add_watch(1, Watcher { clause: 2, blocking_literal: 3 });
+        db.add_watch(
+            1,
+            Watcher {
+                clause: 0,
+                blocking_literal: 1,
+            },
+        );
+        db.add_watch(
+            -1,
+            Watcher {
+                clause: 1,
+                blocking_literal: -1,
+            },
+        );
+        db.add_watch(
+            1,
+            Watcher {
+                clause: 2,
+                blocking_literal: 3,
+            },
+        );
 
-        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 },
-                                    Watcher { clause: 2, blocking_literal: 3 }]);
-        assert_eq!(db.watches(-1), &[Watcher { clause: 1, blocking_literal: -1 }]);
+        assert_eq!(
+            db.watches(1),
+            &[
+                Watcher {
+                    clause: 0,
+                    blocking_literal: 1
+                },
+                Watcher {
+                    clause: 2,
+                    blocking_literal: 3
+                }
+            ]
+        );
+        assert_eq!(
+            db.watches(-1),
+            &[Watcher {
+                clause: 1,
+                blocking_literal: -1
+            }]
+        );
 
-        db.update_watches(1).push(Watcher { clause: 3, blocking_literal: -8 });
-        assert_eq!(db.watches(1), &[Watcher { clause: 0, blocking_literal: 1 },
-                                    Watcher { clause: 2, blocking_literal: 3 },
-                                    Watcher { clause: 3, blocking_literal: -8 }]);
+        db.update_watches(1).push(Watcher {
+            clause: 3,
+            blocking_literal: -8,
+        });
+        assert_eq!(
+            db.watches(1),
+            &[
+                Watcher {
+                    clause: 0,
+                    blocking_literal: 1
+                },
+                Watcher {
+                    clause: 2,
+                    blocking_literal: 3
+                },
+                Watcher {
+                    clause: 3,
+                    blocking_literal: -8
+                }
+            ]
+        );
     }
 }
