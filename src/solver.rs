@@ -4,22 +4,20 @@ use std::io;
 pub type Lit = i32;
 pub type ClauseId = u32;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ClauseDb {
     pool: Vec<Lit>,
     offsets: Vec<usize>,
 }
 
 impl ClauseDb {
-    pub fn new() -> Self {
-        Self {
-            pool: Vec::new(),
-            offsets: Vec::new(),
-        }
-    }
-
     pub fn len(&self) -> usize {
         self.offsets.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) {
@@ -105,12 +103,16 @@ impl WatchersDb {
         }
     }
     pub fn watches(&self, lit: Lit) -> &[Watcher] {
-        let var = var_of(lit).expect("invalid literal") as usize;
-        let watchers = if is_pos(lit) { &self.pos_watchers} else { &self.neg_watchers };
+        let var = var_of(lit).expect("invalid literal");
+        let watchers = if is_pos(lit) {
+            &self.pos_watchers
+        } else {
+            &self.neg_watchers
+        };
         watchers.get(var).map(|w| w.as_slice()).unwrap_or(&self.empty_watch)
     }
     pub fn update_watches(&mut self, lit: Lit) -> &mut Vec<Watcher> {
-        let var = var_of(lit).expect("invalid literal") as usize;
+        let var = var_of(lit).expect("invalid literal");
         let watchers = if is_pos(lit) {
             &mut self.pos_watchers
         } else {
@@ -140,7 +142,7 @@ fn var_of(lit: Lit) -> Option<usize> {
     if lit == 0 {
         None
     } else {
-        Some(lit.abs() as usize)
+        Some(lit.unsigned_abs() as usize)
     }
 }
 
@@ -149,6 +151,7 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0
 }
 
+#[derive(Default)]
 pub struct Solver {
     clauses: ClauseDb,
     assigns: Vec<Assignment>,
@@ -156,15 +159,13 @@ pub struct Solver {
 
 impl Solver {
     pub fn new() -> Self {
-        Self {
-            clauses: ClauseDb::new(),
-            assigns: Vec::new(),
-        }
+        Self::default()
     }
 
     fn ensure_vars(&mut self, var: usize) {
         if var >= self.assigns.len() {
-            self.assigns.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
+            self.assigns
+                .resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
         }
     }
 
@@ -223,10 +224,10 @@ impl Solver {
     }
     /// Query the current assignment of a variable.
     pub fn value_of(&self, var: usize) -> Option<bool> {
-        if var as usize >= self.assigns.len() {
+        if var >= self.assigns.len() {
             None
         } else {
-            Some(self.assigns[var as usize] == Assignment::POSITIVE)
+            Some(self.assigns[var] == Assignment::POSITIVE)
         }
     }
     pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error> {
@@ -269,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_clause_db() {
-        let mut db = ClauseDb::new();
+        let mut db = ClauseDb::default();
         let cl0 = [1, 2, 3, 4];
         let cl1 = [-1, -2, -3];
         let cl2 = [];
@@ -287,7 +288,7 @@ mod tests {
         db.add_clause(c4.as_slice());
         assert_eq!(db.clause(4), &c4);
         assert!(db.clause(2).is_empty());
-        assert!(db.clause(0).len() > 0);
+        assert!(!db.clause(0).is_empty());
 
         db.clause_mut(4)[0] = 8;
         assert_eq!(db.clause(4), &[8, 6]);
