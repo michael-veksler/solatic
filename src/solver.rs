@@ -69,6 +69,15 @@ impl Assignment {
         }
     }
 }
+impl From<bool> for Assignment {
+    fn from(b: bool) -> Self {
+        if b {
+            Assignment::POSITIVE
+        } else {
+            Assignment::NEGATIVE
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SolveResult {
@@ -151,10 +160,28 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PropagationResult {
+    Conflict,
+    Unchanged,
+    Propagated,
+}
+
+impl PropagationResult {
+    pub fn to_option(self) -> Option<()> {
+        if self == PropagationResult::Conflict {
+            None
+        } else {
+            Some(())
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Solver {
     clauses: ClauseDb,
     assigns: Vec<Assignment>,
+    assign_history: Vec<usize>,
 }
 
 impl Solver {
@@ -187,36 +214,94 @@ impl Solver {
         }
     }
 
-    fn is_valid_assignment(&self) -> bool {
-        (0..self.clauses.len()).all(|clause_id| {
-            let clause = self.clauses.clause(clause_id as ClauseId);
-            clause
-                .iter()
-                .any(|&lit| self.literal_state(lit) == Assignment::POSITIVE)
-        })
+    fn find_first_unassigned_var(&self, start: usize) -> Option<usize> {
+        (start..self.assigns.len()).find(|&i| self.assigns[i].is_unassigned())
     }
 
-    fn find_first_unassigned_var(&self, start: usize) -> usize {
-        (start..self.assigns.len())
-            .find(|&i| self.assigns[i].is_unassigned())
-            .unwrap_or(self.assigns.len())
+    fn propagate_clause(&mut self, clause_id: ClauseId) -> PropagationResult {
+        let mut free_literal: Option<Lit> = None;
+        for lit in self.clauses.clause(clause_id) {
+            let state = self.literal_state(*lit);
+            if state == Assignment::POSITIVE {
+                return PropagationResult::Unchanged;
+            }
+            if state.is_unassigned() {
+                if free_literal.is_some() {
+                    return PropagationResult::Unchanged; // Nothing to do with 2 free literals
+                }
+                free_literal = Some(*lit);
+            }
+        }
+        match free_literal {
+            None => PropagationResult::Conflict,
+            Some(free) => {
+                self.set_literal(free);
+                PropagationResult::Propagated
+            }
+        }
     }
 
-    fn try_all_assignments(&mut self, first_var_to_try: usize) -> bool {
-        let var = self.find_first_unassigned_var(first_var_to_try);
-        if var >= self.assigns.len() {
-            return self.is_valid_assignment();
+    fn set_literal(&mut self, lit: Lit) {
+        let var = var_of(lit).expect("invalid literal");
+
+        self.assigns[var] = Assignment::from(is_pos(lit));
+        self.assign_history.push(var);
+    }
+    fn bcp(&mut self) -> Option<()> {
+        let mut stable: bool = false;
+        while !stable {
+            stable = true;
+            for clause_id in 0..self.clauses.len() {
+                match self.propagate_clause(clause_id as ClauseId) {
+                    PropagationResult::Conflict => return None,
+                    PropagationResult::Propagated => {
+                        stable = false;
+                    }
+                    PropagationResult::Unchanged => (),
+                }
+            }
         }
-        self.assigns[var] = Assignment::POSITIVE;
-        if self.try_all_assignments(var + 1) {
-            return true;
+
+        (0..self.clauses.len()).try_for_each(|clause_id| self.propagate_clause(clause_id as ClauseId).to_option())
+    }
+    fn initial_propagate(&mut self) -> Option<()> {
+        (0..self.clauses.len()).try_for_each(|clause_id| self.propagate_clause(clause_id as ClauseId).to_option())
+    }
+
+    fn make_decision(&mut self, decisions: &mut Vec<Lit>) -> Option<()> {
+        let choice = self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
+        decisions.push(choice);
+        self.set_literal(choice);
+        Some(())
+    }
+
+    fn backtrack(&mut self, decisions: &mut Vec<Lit>) -> Option<Lit> {
+        let decision_lit = decisions.pop()?;
+        let decision_var = var_of(decision_lit).expect("invalid literal");
+        while let Some(assigned_var) = self.assign_history.pop() {
+            self.assigns[assigned_var] = Assignment::UNASSIGNED;
+            if assigned_var == decision_var {
+                break;
+            }
         }
-        self.assigns[var] = Assignment::NEGATIVE;
-        if self.try_all_assignments(var + 1) {
-            return true;
+        Some(decision_lit)
+    }
+    fn solve_loop(&mut self) -> Option<()> {
+        let mut decisions: Vec<Lit> = Vec::new();
+        loop {
+            let mut success = self.bcp();
+            if success.is_some() {
+                if self.make_decision(&mut decisions).is_none() {
+                    return Some(());
+                }
+                success = self.bcp();
+            }
+            if success.is_some() {
+                continue;
+            }
+            let conflict_lit = self.backtrack(&mut decisions)?;
+            self.set_literal(-conflict_lit);
         }
-        self.assigns[var] = Assignment::UNASSIGNED;
-        false
     }
 
     pub fn values_len(&self) -> usize {
@@ -252,11 +337,8 @@ impl Solver {
         }
     }
 
-    /// Solve the current formula using propagation only.
-    ///
-    /// Returns `Unsat` if an empty clause or conflict is detected.
     pub fn solve(&mut self) -> SolveResult {
-        if self.try_all_assignments(0) {
+        if self.initial_propagate().and_then(|_| self.solve_loop()).is_some() {
             SolveResult::Sat
         } else {
             SolveResult::Unsat
