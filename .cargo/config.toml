@@ -1,0 +1,2 @@
+[env]
+RSTEST_TIMEOUT = "20"
