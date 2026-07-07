@@ -12,7 +12,7 @@ pub struct ClauseAccessor {
 
 impl ClauseAccessor {
     #[allow(dead_code)]
-    pub fn len(&self) -> usize{
+    pub fn len(&self) -> usize {
         self.post_end - self.begin
     }
     #[allow(dead_code)]
