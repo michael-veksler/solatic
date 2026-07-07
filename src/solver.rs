@@ -5,6 +5,23 @@ pub type Lit = i32;
 pub type ClauseId = u32;
 
 #[derive(Debug, Default)]
+pub struct ClauseAccessor {
+    begin: usize,
+    post_end: usize,
+}
+
+impl ClauseAccessor {
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.post_end - self.begin
+    }
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.post_end == self.begin
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct ClauseDb {
     pool: Vec<Lit>,
     offsets: Vec<usize>,
@@ -20,29 +37,31 @@ impl ClauseDb {
         self.offsets.is_empty()
     }
 
-    pub fn add_clause(&mut self, lits: &[Lit]) {
+    pub fn add_clause(&mut self, lits: &[Lit]) -> ClauseId {
+        let clause_id = self.offsets.len() as ClauseId;
         self.offsets.push(self.pool.len());
         let stored_size: Lit = lits.len().try_into().expect("clause too long");
         self.pool.push(stored_size);
         self.pool.extend_from_slice(lits);
+        clause_id
     }
 
-    fn clause_bounds(&self, id: ClauseId) -> (usize, usize) {
+    pub fn clause(&self, id: ClauseId) -> ClauseAccessor {
         let header_pos = self.offsets[id as usize];
         let size = self.pool[header_pos] as usize;
         let begin = header_pos + 1;
-        let end = begin + size;
-        (begin, end)
+        ClauseAccessor {
+            begin,
+            post_end: begin + size,
+        }
     }
 
-    pub fn clause(&self, id: ClauseId) -> &[Lit] {
-        let (begin, end) = self.clause_bounds(id);
-        &self.pool[begin..end]
+    pub fn literals(&self, clause: ClauseAccessor) -> &[Lit] {
+        &self.pool[clause.begin..clause.post_end]
     }
     #[allow(dead_code)]
-    pub fn clause_mut(&mut self, id: ClauseId) -> &mut [Lit] {
-        let (begin, end) = self.clause_bounds(id);
-        &mut self.pool[begin..end]
+    pub fn literals_mut(&mut self, clause: ClauseAccessor) -> &mut [Lit] {
+        &mut self.pool[clause.begin..clause.post_end]
     }
 }
 
@@ -91,7 +110,7 @@ struct Watcher {
     blocking_literal: Lit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(dead_code)]
 struct WatchersDb {
     // FIXME: Vec<Watch> is not cache friendly.
@@ -104,13 +123,6 @@ struct WatchersDb {
 
 #[allow(dead_code)]
 impl WatchersDb {
-    pub fn new() -> Self {
-        Self {
-            pos_watchers: Vec::new(),
-            neg_watchers: Vec::new(),
-            empty_watch: [],
-        }
-    }
     pub fn watches(&self, lit: Lit) -> &[Watcher] {
         let var = var_of(lit).expect("invalid literal");
         let watchers = if is_pos(lit) {
@@ -181,7 +193,7 @@ impl PropagationResult {
 pub struct Solver {
     clauses: ClauseDb,
     assigns: Vec<Assignment>,
-    assign_history: Vec<usize>,
+    trail: Vec<Lit>,
 }
 
 impl Solver {
@@ -220,7 +232,7 @@ impl Solver {
 
     fn propagate_clause(&mut self, clause_id: ClauseId) -> PropagationResult {
         let mut free_literal: Option<Lit> = None;
-        for lit in self.clauses.clause(clause_id) {
+        for lit in self.clauses.literals(self.clauses.clause(clause_id)) {
             let state = self.literal_state(*lit);
             if state == Assignment::POSITIVE {
                 return PropagationResult::Unchanged;
@@ -245,7 +257,7 @@ impl Solver {
         let var = var_of(lit).expect("invalid literal");
 
         self.assigns[var] = Assignment::from(is_pos(lit));
-        self.assign_history.push(var);
+        self.trail.push(lit);
     }
     fn bcp(&mut self) -> Option<()> {
         let mut stable: bool = false;
@@ -277,10 +289,10 @@ impl Solver {
 
     fn backtrack(&mut self, decisions: &mut Vec<Lit>) -> Option<Lit> {
         let decision_lit = decisions.pop()?;
-        let decision_var = var_of(decision_lit).expect("invalid literal");
-        while let Some(assigned_var) = self.assign_history.pop() {
+        while let Some(assigned_lit) = self.trail.pop() {
+            let assigned_var = var_of(assigned_lit).expect("invalid literal");
             self.assigns[assigned_var] = Assignment::UNASSIGNED;
-            if assigned_var == decision_var {
+            if assigned_lit == decision_lit {
                 break;
             }
         }
@@ -361,24 +373,24 @@ mod tests {
         db.add_clause(cl1.as_slice());
         db.add_clause(cl2.as_slice());
         db.add_clause(cl3.as_slice());
-        assert_eq!(db.clause(0), &cl0);
-        assert_eq!(db.clause(1), &cl1);
-        assert_eq!(db.clause(2), &cl2);
-        assert_eq!(db.clause(3), &cl3);
+        assert_eq!(db.literals(db.clause(0)), &cl0);
+        assert_eq!(db.literals(db.clause(1)), &cl1);
+        assert_eq!(db.literals(db.clause(2)), &cl2);
+        assert_eq!(db.literals(db.clause(3)), &cl3);
 
         let c4 = [5, 6];
         db.add_clause(c4.as_slice());
-        assert_eq!(db.clause(4), &c4);
-        assert!(db.clause(2).is_empty());
-        assert!(!db.clause(0).is_empty());
+        assert_eq!(db.literals(db.clause(4)), &c4);
+        assert!(db.literals(db.clause(2)).is_empty());
+        assert!(!db.literals(db.clause(0)).is_empty());
 
-        db.clause_mut(4)[0] = 8;
-        assert_eq!(db.clause(4), &[8, 6]);
+        db.literals_mut(db.clause(4))[0] = 8;
+        assert_eq!(db.literals(db.clause(4)), &[8, 6]);
     }
 
     #[test]
     fn test_watch_db() {
-        let mut db = WatchersDb::new();
+        let mut db = WatchersDb::default();
         assert!(db.watches(1).is_empty());
         assert!(db.watches(-1).is_empty());
 
