@@ -5,14 +5,13 @@ use std::ops::{Index, IndexMut};
 pub type Lit = i32;
 pub type ClauseId = u32;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ClauseAccessor {
     begin: usize,
     post_end: usize,
 }
 
 impl ClauseAccessor {
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.post_end - self.begin
     }
@@ -64,6 +63,26 @@ impl ClauseDb {
     pub fn literals_mut(&mut self, clause: ClauseAccessor) -> &mut [Lit] {
         &mut self.pool[clause.begin..clause.post_end]
     }
+
+    /// Ensure the falsified literal is stored in the second watched position.
+    ///
+    /// The clause representation assumes the first two literals are the watched positions.
+    /// If the falsified literal is currently in the first watched position, it is swapped
+    /// with the second watched position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `falsified_lit` is not one of the first two literals in the clause.
+    pub fn ensure_falsified_at_pos1(&mut self, clause: ClauseAccessor, falsified_lit: Lit) -> Option<()> {
+        let literals = self.literals_mut(clause);
+        if literals[0] != -falsified_lit && literals[1] != -falsified_lit {
+            return None;
+        }
+        if literals[0] == -falsified_lit {
+            literals.swap(0, 1);
+        }
+        Some(())
+    }
 }
 
 bitflags! {
@@ -108,7 +127,6 @@ pub enum SolveResult {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct Watcher {
     clause: ClauseId,
-    blocking_literal: Lit,
 }
 
 #[derive(Debug, Default)]
@@ -184,26 +202,10 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PropagationResult {
-    Conflict,
-    Unchanged,
-    Propagated,
-}
-
-impl PropagationResult {
-    pub fn to_option(self) -> Option<()> {
-        if self == PropagationResult::Conflict {
-            None
-        } else {
-            Some(())
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct Solver {
     clauses: ClauseDb,
+    watchers: WatchersDb,
     assigns: Vec<Assignment>,
     trail: Vec<Lit>,
 }
@@ -220,12 +222,44 @@ impl Solver {
         }
     }
 
-    pub fn add_clause(&mut self, lits: &[Lit]) {
+    #[must_use]
+    pub fn find_satisfiable_literal(&self, clause: ClauseAccessor, first_lit_index: usize) -> Option<usize> {
+        self.clauses
+            .literals(clause)
+            .iter()
+            .enumerate()
+            .skip(first_lit_index)
+            .find_map(|(i, &lit)| {
+                let state = self.literal_state(lit);
+                if state.contains(Assignment::POSITIVE) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[must_use]
+    pub fn add_clause(&mut self, lits: &[Lit], decision_level: usize) -> Option<()> {
+        // This function has to be rewritten once we have CDCL.
+        // Watches should be added differently, when we add clauses on decision level > 0.
+        assert!(
+            decision_level == 0,
+            "adding clauses at decision level > 0 is not supported yet"
+        );
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.ensure_vars(max_var);
         }
-        self.clauses.push(lits);
+        match lits.len() {
+            0 => return None,
+            1 => self.set_literal(lits[0]),
+            _ => {
+                self.clauses.push(lits);
+            }
+        };
+
+        Some(())
     }
 
     fn literal_state(&self, lit: Lit) -> Assignment {
@@ -242,27 +276,40 @@ impl Solver {
         (start..self.assigns.len()).find(|&i| self.assigns[i].is_unassigned())
     }
 
-    fn propagate_clause(&mut self, clause_id: ClauseId) -> PropagationResult {
-        let mut free_literal: Option<Lit> = None;
-        for lit in self.clauses.literals(self.clauses.get(clause_id)) {
-            let state = self.literal_state(*lit);
-            if state == Assignment::POSITIVE {
-                return PropagationResult::Unchanged;
-            }
-            if state.is_unassigned() {
-                if free_literal.is_some() {
-                    return PropagationResult::Unchanged; // Nothing to do with 2 free literals
-                }
-                free_literal = Some(*lit);
+    fn propagate_clause(&mut self, clause_id: ClauseId, clause: ClauseAccessor, falsified_lit: Lit) -> Option<()> {
+        assert!(
+            clause.len() >= 2,
+            "Short clauses should never be entered into the ClauseDB - they are stored as blocking literals only"
+        );
+        self.clauses.ensure_falsified_at_pos1(clause, falsified_lit);
+        let blocking_literal = self.clauses.literals(clause)[0];
+        let blocking_state = self.literal_state(blocking_literal);
+        if blocking_state == Assignment::POSITIVE {
+            return Some(());
+        }
+        if let Some(nonempty_pos) = self.find_satisfiable_literal(clause, 2) {
+            self.clauses.literals_mut(clause).swap(1, nonempty_pos);
+            let new_watched_lit = self.clauses.literals(clause)[1];
+            self.watchers.add_watch(new_watched_lit, Watcher { clause: clause_id });
+            Some(())
+        } else if blocking_state == Assignment::NEGATIVE {
+            None
+        } else {
+            self.set_literal(blocking_literal);
+            Some(())
+        }
+    }
+    fn initial_propagate_clause(&mut self, clause_id: ClauseId) -> Option<()> {
+        let clause = self.clauses.get(clause_id);
+        for pos in [1, 0] {
+            let lit = self.clauses.literals(clause)[pos];
+            if self.literal_state(lit) == Assignment::NEGATIVE {
+                self.propagate_clause(clause_id, clause, lit)?;
+            } else {
+                self.watchers.add_watch(lit, Watcher { clause: clause_id });
             }
         }
-        match free_literal {
-            None => PropagationResult::Conflict,
-            Some(free) => {
-                self.set_literal(free);
-                PropagationResult::Propagated
-            }
-        }
+        Some(())
     }
 
     fn set_literal(&mut self, lit: Lit) {
@@ -271,34 +318,60 @@ impl Solver {
         self.assigns[var] = Assignment::from(is_pos(lit));
         self.trail.push(lit);
     }
-    fn bcp(&mut self) -> Option<()> {
-        let mut stable: bool = false;
-        while !stable {
-            stable = true;
-            for clause_id in 0..self.clauses.len() {
-                match self.propagate_clause(clause_id as ClauseId) {
-                    PropagationResult::Conflict => return None,
-                    PropagationResult::Propagated => {
-                        stable = false;
-                    }
-                    PropagationResult::Unchanged => (),
+    #[must_use]
+    fn bcp(&mut self, trail_read_start: usize) -> Option<()> {
+        let mut trail_read = trail_read_start;
+        while let Some(propagated_lit) = self.trail.get(trail_read) {
+            self.propagate_literal(*propagated_lit)?;
+            trail_read += 1;
+        }
+        Some(())
+    }
+    #[must_use]
+    fn propagate_literal(&mut self, set_lit: Lit) -> Option<()> {
+        let mut num_written_entries = 0usize;
+        let mut read_entry;
+        let falsified_lit = -set_lit;
+        for i in 0..self.watchers[falsified_lit].len() {
+            read_entry = i;
+            let watcher = self.watchers[falsified_lit][read_entry];
+            let clause = self.clauses.get(watcher.clause);
+
+            if self.propagate_clause(watcher.clause, clause, set_lit).is_none() {
+                // Don't remove the read_entry, which was failing
+                self.watchers[falsified_lit].drain(num_written_entries..read_entry);
+                // PERFORMANCE: Big O complexity-wise, it is better to move elements from the end to fill the gap than just drop()
+                //              however, measurements of medium-small problems a simple O(N) drop was slightly faster.
+
+                return None;
+            }
+            if clause.len() >= 2 {
+                let literals = self.clauses.literals(clause);
+                if literals[0] != falsified_lit && literals[1] != falsified_lit {
+                    continue;
                 }
             }
+            self.watchers[falsified_lit][num_written_entries] = Watcher { clause: watcher.clause };
+            num_written_entries += 1;
         }
-
-        (0..self.clauses.len()).try_for_each(|clause_id| self.propagate_clause(clause_id as ClauseId).to_option())
+        self.watchers[falsified_lit].drain(num_written_entries..);
+        Some(())
     }
+
+    #[must_use]
     fn initial_propagate(&mut self) -> Option<()> {
-        (0..self.clauses.len()).try_for_each(|clause_id| self.propagate_clause(clause_id as ClauseId).to_option())
+        (0..self.clauses.len()).try_for_each(|clause_id| self.initial_propagate_clause(clause_id as ClauseId))
     }
 
+    #[must_use]
     fn make_decision(&mut self, decisions: &mut Vec<Lit>) -> Option<()> {
-        let choice = self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
+        let choice = -self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
         decisions.push(choice);
         self.set_literal(choice);
         Some(())
     }
 
+    #[must_use]
     fn backtrack(&mut self, decisions: &mut Vec<Lit>) -> Option<Lit> {
         let decision_lit = decisions.pop()?;
         while let Some(assigned_lit) = self.trail.pop() {
@@ -310,20 +383,20 @@ impl Solver {
         }
         Some(decision_lit)
     }
+    #[must_use]
     fn solve_loop(&mut self) -> Option<()> {
         let mut decisions: Vec<Lit> = Vec::new();
+        let mut trail_read_pos = 0;
         loop {
-            let mut success = self.bcp();
-            if success.is_some() {
+            if self.bcp(trail_read_pos).is_some() {
+                trail_read_pos = self.trail.len();
                 if self.make_decision(&mut decisions).is_none() {
                     return Some(());
                 }
-                success = self.bcp();
-            }
-            if success.is_some() {
                 continue;
             }
             let conflict_lit = self.backtrack(&mut decisions)?;
+            trail_read_pos = self.trail.len();
             self.set_literal(-conflict_lit);
         }
     }
@@ -406,69 +479,17 @@ mod tests {
         assert!(db[1].is_empty());
         assert!(db[-1].is_empty());
 
-        db.add_watch(
-            1,
-            Watcher {
-                clause: 0,
-                blocking_literal: 1,
-            },
-        );
-        db.add_watch(
-            -1,
-            Watcher {
-                clause: 1,
-                blocking_literal: -1,
-            },
-        );
-        db.add_watch(
-            1,
-            Watcher {
-                clause: 2,
-                blocking_literal: 3,
-            },
-        );
+        db.add_watch(1, Watcher { clause: 0 });
+        db.add_watch(-1, Watcher { clause: 1 });
+        db.add_watch(1, Watcher { clause: 2 });
 
+        assert_eq!(db[1], &[Watcher { clause: 0 }, Watcher { clause: 2 }]);
+        assert_eq!(db[-1], &[Watcher { clause: 1 }]);
+
+        db[1].push(Watcher { clause: 3 });
         assert_eq!(
             db[1],
-            &[
-                Watcher {
-                    clause: 0,
-                    blocking_literal: 1
-                },
-                Watcher {
-                    clause: 2,
-                    blocking_literal: 3
-                }
-            ]
-        );
-        assert_eq!(
-            db[-1],
-            &[Watcher {
-                clause: 1,
-                blocking_literal: -1
-            }]
-        );
-
-        db[1].push(Watcher {
-            clause: 3,
-            blocking_literal: -8,
-        });
-        assert_eq!(
-            db[1],
-            &[
-                Watcher {
-                    clause: 0,
-                    blocking_literal: 1
-                },
-                Watcher {
-                    clause: 2,
-                    blocking_literal: 3
-                },
-                Watcher {
-                    clause: 3,
-                    blocking_literal: -8
-                }
-            ]
+            &[Watcher { clause: 0 }, Watcher { clause: 2 }, Watcher { clause: 3 }]
         );
     }
 }
