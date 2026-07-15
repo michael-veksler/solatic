@@ -219,7 +219,8 @@ class AllDiffBuilder:
         """Create a single != constraint, relying on self.eq_bool_vars correctness"""
         first_bools = self.int_db.get(first_int)
         second_bools = self.int_db.get(second_int)
-        self.cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: ({self._bool_vars_to_str(first_bools)}) != ({self._bool_vars_to_str(second_bools)})")
+        self.cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: "
+                                f"({self._bool_vars_to_str(first_bools)}) != ({self._bool_vars_to_str(second_bools)})")
 
         at_least_one_should_be_false: list[int] = [
             self.eq_bool_vars[(first_bool, second_bool)]
