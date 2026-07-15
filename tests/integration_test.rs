@@ -26,9 +26,11 @@ fn config() -> &'static TestConfig {
 
 #[rstest]
 #[case::sat_3_vars("SAT-3-vars")]
+#[case::sat_4_2_bit_mostly_all_diff("SAT-4-2-bit-mostly-all-diff")]
 #[case::unsat_4_2_bit_all_diff("UNSAT-4-2-bit-all-diff")]
 #[case::unsat_5_2_bit_all_diff("UNSAT-5-2-bit-all-diff")]
 #[case::unsat_8_3_bit_all_diff("UNSAT-8-3-bit-all-diff")]
+#[case::unsat_9_3_bit_all_diff("UNSAT-9-3-bit-all-diff")]
 fn test_cnf(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
     let test_path = format!("{}/{test_stem}.cnf", config.input_path);
     let input_cnf = fs::read_to_string(&test_path)?;

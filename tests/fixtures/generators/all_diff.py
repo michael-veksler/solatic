@@ -3,7 +3,7 @@
 
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 
 def get_args() -> argparse.Namespace:
@@ -78,7 +78,18 @@ class IntDb:
     int_bits: int
     n_ints: int
     domain_size: int | None
-    int_var_as_bools: dict[int, list[int]]
+    cnf_db: CnfDb
+    _int_var_as_bools: dict[int, list[int]] = field(default_factory=dict)
+
+    def get(self, number: int) -> list[int]:
+        """Get the list of boolean variables that represent this number, possibly creating them"""
+        result = self._int_var_as_bools.get(number)
+        if result is None:
+            result =[self.cnf_db.add_var() for _ in range(self.int_bits)]
+            self.cnf_db.add_comment(f"int({number}) V{result[0]}..={result[-1]}")
+            self._int_var_as_bools[number] = result
+        return result
+
 
     def add_cnf_header(self, cnf_db: CnfDb, prog: str) -> None:
         """Add the integer info the the CNF header"""
@@ -95,21 +106,16 @@ class AllDiffBuilder:
         self.int_db = IntDb(int_bits=int_bits,
                             n_ints=n_ints,
                             domain_size=domain_size,
-                            int_var_as_bools=self.register_ints(n_ints, int_bits))
+                            cnf_db=self.cnf_db)
         self.eq_bool_vars: dict[(int, int), int] = {}
         self._init_eq_bool_vars()
         self.prog = prog
 
-    def register_ints(self, n_ints: int, int_bits: int) -> list[list[int]]:
-        """Register n_ints integers and return a list bool variables for each int variable"""
-        return [[self.cnf_db.add_var() for _ in range(int_bits)]
-                for _ in range(n_ints)]
-
     def _init_eq_bool_vars(self) -> None:
         for first_int_var in range(self.int_db.n_ints):
-            first_bool_vars = self.int_db.int_var_as_bools[first_int_var]
+            first_bool_vars = self.int_db.get(first_int_var)
             for second_int_var in range(self.int_db.n_ints):
-                second_bool_vars = self.int_db.int_var_as_bools[second_int_var]
+                second_bool_vars = self.int_db.get(second_int_var)
                 assert len(first_bool_vars) == len(second_bool_vars)
                 for first, second in zip(first_bool_vars, second_bool_vars):
                     self._add_unique_eq_bool_var(first, second)
@@ -123,7 +129,7 @@ class AllDiffBuilder:
         var = self.cnf_db.add_var()
         self.eq_bool_vars[(first, second)] = var
         self.eq_bool_vars[(second, first)] = var
-
+        self.cnf_db.add_comment(f'(V{first} == V{second}) iff V{var}')
 
     def build_cnf(self) -> None:
         """Construct a CNF in DIMACS format and output to stdout"""
@@ -144,7 +150,7 @@ class AllDiffBuilder:
 
     def build_domain_constraint(self, int_var: int) -> None:
         """Make sure this integer variable fit the domain size, i.e., value(var) < self.int_db.domain_size"""
-        bool_vars = self.int_db.int_var_as_bools[int_var]
+        bool_vars = self.int_db.get(int_var)
         if self.int_db.domain_size >= 2**len(bool_vars):
             return
         max_bits = [((self.int_db.domain_size-1) >> bit_index) & 1 for bit_index, _ in enumerate(bool_vars)]
@@ -211,9 +217,10 @@ class AllDiffBuilder:
 
     def build_ne_constraint(self, first_int: int, second_int) -> None:
         """Create a single != constraint, relying on self.eq_bool_vars correctness"""
-        first_bools = self.int_db.int_var_as_bools[first_int]
-        second_bools = self.int_db.int_var_as_bools[second_int]
-        self.cnf_db.add_comment(f"({self._bool_vars_to_str(first_bools)}) != ({self._bool_vars_to_str(second_bools)})")
+        first_bools = self.int_db.get(first_int)
+        second_bools = self.int_db.get(second_int)
+        self.cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: "
+                                f"({self._bool_vars_to_str(first_bools)}) != ({self._bool_vars_to_str(second_bools)})")
 
         at_least_one_should_be_false: list[int] = [
             self.eq_bool_vars[(first_bool, second_bool)]
