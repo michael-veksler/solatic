@@ -107,7 +107,7 @@ class IntDb:
     int_spec: IntSpec
     n_ints: int
     cnf_db: CnfDb
-    int_representation: IntRepresentation
+    int_representation: "IntRepresentation"
     _int_var_as_bools: dict[int, list[int]]
 
     def __init__(self, int_spec: IntSpec, n_ints: int, cnf_db: CnfDb):
@@ -116,7 +116,7 @@ class IntDb:
         self.cnf_db = cnf_db
         self._int_var_as_bools = {}
 
-        representations: dict[IntFormat, type[IntRepresentation]] = {
+        representations: dict[IntFormat, type["IntRepresentation"]] = {
             IntFormat.BASE2: Base2IntRepresentation,
             IntFormat.ONE_HOT: OneHotRepresentation
         }
