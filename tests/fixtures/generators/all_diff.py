@@ -2,13 +2,25 @@
 """ Generate AllDiff CNF"""
 
 
+from abc import ABC, abstractmethod
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import StrEnum
 from io import StringIO
+import itertools
+
+
+class IntFormat(StrEnum):
+    """The encoding to use for int representation"""
+    BASE2 = "base2"
+    ONE_HOT = "one-hot"
+    DEFAULT = BASE2
+
 
 def get_args() -> argparse.Namespace:
     """Parse the cmdline arguments"""
-    parser = argparse.ArgumentParser(description="Construct a CNF for all-diff")
+    parser = argparse.ArgumentParser(description="Construct a CNF for all-diff",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--int-bits", type=int, required=True,
                         help="How many bits per integer")
     parser.add_argument("--n-ints", type=int, required=True,
@@ -16,6 +28,12 @@ def get_args() -> argparse.Namespace:
 
     parser.add_argument("--domain-size", type=int,
                         help="The number of possible integer values to choose from")
+
+    parser.add_argument("--int-format", choices=list(IntFormat), type=IntFormat, default=IntFormat.DEFAULT,
+                        help=("Choose a representation for integers.\n"
+                              "Base2 is the standard binary representation in computers.\n"
+                              "One-hot is when for domain [0..N-1] there are bits b[0]..b[N-1] where exactly one bit "
+                              "is 1, so that b[x] == 1 means that integer x is the solution."))
 
     args = parser.parse_args()
     args.prog = parser.prog
@@ -80,16 +98,30 @@ class CnfDb:
 @dataclass
 class IntSpec:
     """How integers are represented including all parameters"""
+    int_format: IntFormat
     int_bits: int
     domain_size: int|None
 
-@dataclass
 class IntDb:
     """Class responsible for mapping from integer variables to binary variables"""
     int_spec: IntSpec
     n_ints: int
     cnf_db: CnfDb
-    _int_var_as_bools: dict[int, list[int]] = field(default_factory=dict[int, list[int]])
+    int_representation: IntRepresentation
+    _int_var_as_bools: dict[int, list[int]]
+
+    def __init__(self, int_spec: IntSpec, n_ints: int, cnf_db: CnfDb):
+        self.int_spec = int_spec
+        self.n_ints = n_ints
+        self.cnf_db = cnf_db
+        self._int_var_as_bools = {}
+
+        representations: dict[IntFormat, type[IntRepresentation]] = {
+            IntFormat.BASE2: Base2IntRepresentation,
+            IntFormat.ONE_HOT: OneHotRepresentation
+        }
+        self.int_representation = representations[self.int_spec.int_format]()
+
 
     def get(self, number: int) -> list[int]:
         """Get the list of boolean variables that represent this number, possibly creating them"""
@@ -98,39 +130,9 @@ class IntDb:
             result =[self.cnf_db.add_var() for _ in range(self.int_spec.int_bits)]
             self.cnf_db.add_comment(f"int({number}) V{result[0]}..={result[-1]}")
             self._int_var_as_bools[number] = result
-            self._build_domain_constraint(result)
+            self.int_representation.build_domain_constraint(self, result)
         return result
 
-    def _build_domain_constraint(self, bool_vars: list[int]) -> None:
-        """Make sure this integer variable fit the domain size, i.e., value(var) < self.int_spec.domain_size
-
-        Args:
-            bool_vars: standard base2 binary representation, where bool_vars[i] is the i-th bit.
-        """
-        if self.int_spec.domain_size is None:
-            return
-        if self.int_spec.domain_size >= 2**len(bool_vars):
-            return
-        max_bits = [((self.int_spec.domain_size-1) >> bit_index) & 1 for bit_index, _ in enumerate(bool_vars)]
-
-        self.cnf_db.add_comment(f"({self.cnf_db.vars_to_str(bool_vars)}) <= {self.int_spec.domain_size-1}")
-
-        # 0 prefix (MSB) will constrain all these MSB to be 0
-        while max_bits and max_bits[-1] == 0:
-            self.cnf_db.add_clause([max_bits.pop()])
-            bool_vars.pop()
-
-        # 1 suffix (LSB) means all these LSB are unconstrained
-        while max_bits and max_bits[0] == 1:
-            bool_vars.pop(0)
-            max_bits.pop(0)
-        if not max_bits:
-            return
-
-        if max_bits != [0]+ [1] * (len(max_bits)-1):
-            raise ValueError("supporting domain sizes up to 2**bits - 2")
-
-        self.cnf_db.add_clause([-var for var in bool_vars])
 
     def add_cnf_header(self, cnf_db: CnfDb, prog: str) -> None:
         """Add the integer info the the CNF header"""
@@ -200,20 +202,107 @@ class ConstraintDb: # pylint: disable=too-few-public-methods
             self.cnf_db.add_clause([first, -second, -eq_var])
         self.cnf_db.add_separators()
 
-    def build_ne_constraint(self, first_int: int, second_int: int) -> None:
+
+class IntRepresentation(ABC):
+    """A strategy object that manages int handling under a specific int representation"""
+    @abstractmethod
+    def build_domain_constraint(self, int_db: IntDb, bool_vars: list[int]) -> None:
+        """Build for integers to be legal under the representation"""
+
+    @abstractmethod
+    def build_ne_constraint(self, constraint_db: ConstraintDb, first_int: int, second_int: int):
+        """Constraint two integer variables to be different"""
+
+
+class Base2IntRepresentation(IntRepresentation):
+    """The strategy for handling base-2 (i.e. binary) representation"""
+    def build_domain_constraint(self, int_db: IntDb, bool_vars: list[int]) -> None:
+        """Make sure this integer variable fit the domain size, i.e., value(var) < self.int_spec.domain_size
+
+        Args:
+            bool_vars: standard base2 binary representation, where bool_vars[i] is the i-th bit.
+        """
+        spec = int_db.int_spec
+        if spec.domain_size is None:
+            return
+        if spec.domain_size >= 2**len(bool_vars):
+            return
+        max_bits = [((spec.domain_size-1) >> bit_index) & 1 for bit_index, _ in enumerate(bool_vars)]
+        cnf_db = int_db.cnf_db
+        cnf_db.add_comment(f"({cnf_db.vars_to_str(bool_vars)}) <= {spec.domain_size-1}")
+
+        # 0 prefix (MSB) will constrain all these MSB to be 0
+        while max_bits and max_bits[-1] == 0:
+            cnf_db.add_clause([max_bits.pop()])
+            bool_vars.pop()
+
+        # 1 suffix (LSB) means all these LSB are unconstrained
+        while max_bits and max_bits[0] == 1:
+            bool_vars.pop(0)
+            max_bits.pop(0)
+        if not max_bits:
+            return
+
+        if max_bits != [0]+ [1] * (len(max_bits)-1):
+            raise ValueError("supporting domain sizes up to 2**bits - 2")
+
+        cnf_db.add_clause([-var for var in bool_vars])
+
+    def build_ne_constraint(self, constraint_db: ConstraintDb, first_int: int, second_int: int):
         """Create a single != constraint, relying on self.bool_constraint_db correctness"""
-        first_bools = self.int_db.get(first_int)
-        second_bools = self.int_db.get(second_int)
-        cnf_db = self.cnf_db
-        self.cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: "
-                                f"({cnf_db.vars_to_str(first_bools)}) != ({cnf_db.vars_to_str(second_bools)})")
+        int_db = constraint_db.int_db
+        first_bools = int_db.get(first_int)
+        second_bools = int_db.get(second_int)
+        cnf_db = int_db.cnf_db
+        cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: "
+                           f"({cnf_db.vars_to_str(first_bools)}) != ({cnf_db.vars_to_str(second_bools)})")
 
         at_least_one_should_be_false: list[int] = [
-            self.eval_bool_eq(first_bool, second_bool)
+            constraint_db.eval_bool_eq(first_bool, second_bool)
             for first_bool, second_bool in zip(first_bools, second_bools)]
 
-        self.cnf_db.add_clause([-var for var in at_least_one_should_be_false])
+        cnf_db.add_clause([-var for var in at_least_one_should_be_false])
 
+class OneHotRepresentation(IntRepresentation):
+    """The strategy for handling one-hot representation
+
+    In one-hot, each Boolean variable represent a possible value.
+    If an integer variable x has the domain of {1,2,3}, then the boolean variables v1, v2, v3
+    may represent x, such that if v2=1 then x=2, and if v1=1 then x=1.
+    This means that a general constraints are:
+      - At most one of them is set: (!v1 || !v2), (!v1 || !v3), (!v2 || !v3)
+      - At least one of them is set: (v1 || v2 || v3)
+
+    Number of bits also define the domain size.
+    """
+    def build_domain_constraint(self, int_db: IntDb, bool_vars: list[int]) -> None:
+        """Make sure this integer conform to the one-hot structure.
+
+        Args:
+            bool_vars: standard one-hot binary representation (see class docstring).
+        """
+        spec = int_db.int_spec
+        if spec.domain_size is not None:
+            raise RuntimeError("You can't specify --domain-size for --int-format one-hot")
+        cnf_db = int_db.cnf_db
+        cnf_db.add_comment(f"({cnf_db.vars_to_str(bool_vars)}) valid one-hot")
+        for first_index, first_var in enumerate(bool_vars[:-1]):
+            for second_var in itertools.islice(bool_vars, first_index+1, len(bool_vars)):
+                cnf_db.add_clause([-first_var, -second_var])
+
+        cnf_db.add_clause(bool_vars)
+
+    def build_ne_constraint(self, constraint_db: ConstraintDb, first_int: int, second_int: int):
+        """Create a single != constraint, relying on self.bool_constraint_db correctness"""
+        int_db = constraint_db.int_db
+        first_bools = int_db.get(first_int)
+        second_bools = int_db.get(second_int)
+        cnf_db = int_db.cnf_db
+        cnf_db.add_comment(f"(int({first_int}) != int({second_int})) :: "
+                           f"({cnf_db.vars_to_str(first_bools)}) != ({cnf_db.vars_to_str(second_bools)})")
+
+        for first_bool, second_bool in zip(first_bools, second_bools):
+            cnf_db.add_clause([-first_bool, -second_bool])
 
 
 class AllDiffBuilder:
@@ -241,12 +330,12 @@ class AllDiffBuilder:
         """Build all the inequality constraints of all_diff"""
         for first_int in range(self.int_db.n_ints):
             for second_int in range(first_int +1, self.int_db.n_ints):
-                self.constraint_db.build_ne_constraint(first_int, second_int)
+                self.int_db.int_representation.build_ne_constraint(self.constraint_db, first_int, second_int)
 
 def main():
     """The main of this script"""
     args = get_args()
-    int_spec = IntSpec(int_bits=args.int_bits, domain_size=args.domain_size)
+    int_spec = IntSpec(int_format=args.int_format, int_bits=args.int_bits, domain_size=args.domain_size)
     builder = AllDiffBuilder(prog=args.prog, int_spec=int_spec, n_ints=args.n_ints)
     builder.build_cnf()
 
