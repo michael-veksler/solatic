@@ -203,23 +203,41 @@ fn is_pos(lit: Lit) -> bool {
 }
 
 #[derive(Default)]
+struct VariableDb {
+    values: Vec<Assignment>,
+    level: Vec<usize>,
+}
+
+impl VariableDb {
+    fn ensure_vars(&mut self, var: usize) {
+        if var >= self.len() {
+            self.values.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
+            self.level.resize(var + 1, 0);
+        }
+    }
+
+    fn get_value(&self, i: usize) -> Assignment {
+        self.values[i]
+    }
+    fn set_value(&mut self, i: usize, value: Assignment) {
+        self.values[i] = value;
+    }
+    fn len(&self) -> usize {
+        debug_assert!(self.values.len() == self.level.len());
+        self.values.len()
+    }
+}
+#[derive(Default)]
 pub struct Solver {
     clauses: ClauseDb,
     watchers: WatchersDb,
-    assigns: Vec<Assignment>,
+    variables: VariableDb,
     trail: Vec<Lit>,
 }
 
 impl Solver {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn ensure_vars(&mut self, var: usize) {
-        if var >= self.assigns.len() {
-            self.assigns
-                .resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
-        }
     }
 
     #[must_use]
@@ -249,7 +267,7 @@ impl Solver {
         );
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
-            self.ensure_vars(max_var);
+            self.variables.ensure_vars(max_var);
         }
         match lits.len() {
             0 => return None,
@@ -264,7 +282,7 @@ impl Solver {
 
     fn literal_state(&self, lit: Lit) -> Assignment {
         let var = var_of(lit).expect("invalid 0 literal");
-        let assignment = self.assigns[var];
+        let assignment = self.variables.get_value(var);
         if is_pos(lit) {
             assignment
         } else {
@@ -273,7 +291,7 @@ impl Solver {
     }
 
     fn find_first_unassigned_var(&self, start: usize) -> Option<usize> {
-        (start..self.assigns.len()).find(|&i| self.assigns[i].is_unassigned())
+        (start..self.variables.len()).find(|&i| self.variables.get_value(i).is_unassigned())
     }
 
     fn propagate_clause(&mut self, clause_id: ClauseId, clause: ClauseAccessor, falsified_lit: Lit) -> Option<()> {
@@ -315,7 +333,7 @@ impl Solver {
     fn set_literal(&mut self, lit: Lit) {
         let var = var_of(lit).expect("invalid literal");
 
-        self.assigns[var] = Assignment::from(is_pos(lit));
+        self.variables.set_value(var, Assignment::from(is_pos(lit)));
         self.trail.push(lit);
     }
     #[must_use]
@@ -376,7 +394,7 @@ impl Solver {
         let decision_lit = decisions.pop()?;
         while let Some(assigned_lit) = self.trail.pop() {
             let assigned_var = var_of(assigned_lit).expect("invalid literal");
-            self.assigns[assigned_var] = Assignment::UNASSIGNED;
+            self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
             if assigned_lit == decision_lit {
                 break;
             }
@@ -402,14 +420,14 @@ impl Solver {
     }
 
     pub fn values_len(&self) -> usize {
-        self.assigns.len()
+        self.variables.len()
     }
     /// Query the current assignment of a variable.
     pub fn value_of(&self, var: usize) -> Option<bool> {
-        if var >= self.assigns.len() {
+        if var >= self.variables.len() {
             None
         } else {
-            Some(self.assigns[var] == Assignment::POSITIVE)
+            Some(self.variables.get_value(var) == Assignment::POSITIVE)
         }
     }
     pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error> {
