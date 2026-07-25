@@ -4,6 +4,9 @@ use std::ops::{Index, IndexMut};
 
 pub type Lit = i32;
 pub type ClauseId = u32;
+const NULL_CLAUSE: ClauseId = ClauseId::MAX;
+
+type Reason = ClauseId;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClauseAccessor {
@@ -202,17 +205,22 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0
 }
 
+#[derive(Clone, Copy)]
+struct AssignmentHistory {
+    trail_index: u32,
+}
+
 #[derive(Default)]
 struct VariableDb {
     values: Vec<Assignment>,
-    level: Vec<usize>,
+    history: Vec<AssignmentHistory>,
 }
 
 impl VariableDb {
     fn ensure_vars(&mut self, var: usize) {
         if var >= self.len() {
             self.values.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
-            self.level.resize(var + 1, 0);
+            self.history.resize(var + 1, AssignmentHistory { trail_index: 0 });
         }
     }
 
@@ -223,7 +231,7 @@ impl VariableDb {
         self.values[i] = value;
     }
     fn len(&self) -> usize {
-        debug_assert!(self.values.len() == self.level.len());
+        debug_assert!(self.values.len() == self.history.len());
         self.values.len()
     }
 }
@@ -232,6 +240,7 @@ pub struct Solver {
     clauses: ClauseDb,
     watchers: WatchersDb,
     variables: VariableDb,
+    decisions: Vec<Lit>,
     trail: Vec<Lit>,
 }
 
@@ -257,8 +266,13 @@ impl Solver {
             })
     }
 
+    /// Add a clause, and on success return its ClauseId
+    ///
+    /// None means there was a conflict, i.e., an empty clause inserted
+    /// Some(NULL_CLAUSE) means that the clause impacted the state but doesn't have an ID.
+    /// For example, if it was propagated immediately to variables' assignment state.
     #[must_use]
-    pub fn add_clause(&mut self, lits: &[Lit], decision_level: usize) -> Option<()> {
+    pub fn add_clause(&mut self, lits: &[Lit], decision_level: usize) -> Option<ClauseId> {
         // This function has to be rewritten once we have CDCL.
         // Watches should be added differently, when we add clauses on decision level > 0.
         assert!(
@@ -270,14 +284,16 @@ impl Solver {
             self.variables.ensure_vars(max_var);
         }
         match lits.len() {
-            0 => return None,
-            1 => self.set_literal(lits[0]),
+            0 => None,
+            1 => {
+                self.set_literal(lits[0]);
+                Some(NULL_CLAUSE)
+            }
             _ => {
                 self.clauses.push(lits);
+                Some(self.clauses.len() as ClauseId - 1)
             }
-        };
-
-        Some(())
+        }
     }
 
     fn literal_state(&self, lit: Lit) -> Assignment {
@@ -294,12 +310,22 @@ impl Solver {
         (start..self.variables.len()).find(|&i| self.variables.get_value(i).is_unassigned())
     }
 
+    /// Propagate the clause.
+    ///
+    /// The clause is propagated only if falsified_lit is one of the first 2 literals of the clause.
+    /// Otherwise it is simply ignored.
+    /// TODO Future optimization: Don't even call this function in this case.
+    ///
+    /// Return: Some(()) on success, and None on conflict.
+    #[must_use]
     fn propagate_clause(&mut self, clause_id: ClauseId, clause: ClauseAccessor, falsified_lit: Lit) -> Option<()> {
         assert!(
             clause.len() >= 2,
             "Short clauses should never be entered into the ClauseDB - they are stored as blocking literals only"
         );
-        self.clauses.ensure_falsified_at_pos1(clause, falsified_lit);
+        if self.clauses.ensure_falsified_at_pos1(clause, falsified_lit).is_none() {
+            return Some(()); // Triggered by a stale watch, so ignore it.
+        }
         let blocking_literal = self.clauses.literals(clause)[0];
         let blocking_state = self.literal_state(blocking_literal);
         if blocking_state == Assignment::POSITIVE {
@@ -334,19 +360,37 @@ impl Solver {
         let var = var_of(lit).expect("invalid literal");
 
         self.variables.set_value(var, Assignment::from(is_pos(lit)));
+        self.variables.history[var].trail_index = self.trail.len() as u32;
         self.trail.push(lit);
     }
+    /// Propagate all newly modified literals
+    ///
+    /// If the propagation modifies literals, then also consider them, until all modified literals are propagated.
+    ///
+    /// Return: None on success, Some(reason) if a conflict was caused by the reason.
+    ///         A reason is a clause or another literal.
     #[must_use]
-    fn bcp(&mut self, trail_read_start: usize) -> Option<()> {
+    fn bcp(&mut self, trail_read_start: usize) -> Option<Reason> {
         let mut trail_read = trail_read_start;
-        while let Some(propagated_lit) = self.trail.get(trail_read) {
-            self.propagate_literal(*propagated_lit)?;
+        while let Some(set_lit_ref) = self.trail.get(trail_read) {
+            let set_lit = *set_lit_ref;
+            if let Some(conflict_reason) = self.propagate_literal(set_lit) {
+                return Some(conflict_reason);
+            }
             trail_read += 1;
         }
-        Some(())
+        None
     }
+
+    /// Propagate all clauses that watch the effect of setting a literal.
+    ///
+    /// The passed parameter set_lit indicates which literal was set,
+    /// but the watches are for its negation - the falsified literal.
+    ///
+    /// Return: The reason for the conflict, or None.
+    ///         Usually this is the id of the conflicting clause or None if no conflict.
     #[must_use]
-    fn propagate_literal(&mut self, set_lit: Lit) -> Option<()> {
+    fn propagate_literal(&mut self, set_lit: Lit) -> Option<Reason> {
         let mut num_written_entries = 0usize;
         let mut read_entry;
         let falsified_lit = -set_lit;
@@ -361,7 +405,7 @@ impl Solver {
                 // PERFORMANCE: Big O complexity-wise, it is better to move elements from the end to fill the gap than just drop()
                 //              however, measurements of medium-small problems a simple O(N) drop was slightly faster.
 
-                return None;
+                return Some(watcher.clause);
             }
             if clause.len() >= 2 {
                 let literals = self.clauses.literals(clause);
@@ -373,7 +417,7 @@ impl Solver {
             num_written_entries += 1;
         }
         self.watchers[falsified_lit].drain(num_written_entries..);
-        Some(())
+        None
     }
 
     #[must_use]
@@ -382,16 +426,16 @@ impl Solver {
     }
 
     #[must_use]
-    fn make_decision(&mut self, decisions: &mut Vec<Lit>) -> Option<()> {
+    fn make_decision(&mut self) -> Option<()> {
         let choice = -self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
-        decisions.push(choice);
+        self.decisions.push(choice);
         self.set_literal(choice);
         Some(())
     }
 
     #[must_use]
-    fn backtrack(&mut self, decisions: &mut Vec<Lit>) -> Option<Lit> {
-        let decision_lit = decisions.pop()?;
+    fn backtrack(&mut self) -> Option<Lit> {
+        let decision_lit = self.decisions.pop()?;
         while let Some(assigned_lit) = self.trail.pop() {
             let assigned_var = var_of(assigned_lit).expect("invalid literal");
             self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
@@ -403,19 +447,19 @@ impl Solver {
     }
     #[must_use]
     fn solve_loop(&mut self) -> Option<()> {
-        let mut decisions: Vec<Lit> = Vec::new();
+        self.decisions.clear();
         let mut trail_read_pos = 0;
         loop {
-            if self.bcp(trail_read_pos).is_some() {
+            if let Some(_conflict_reason) = self.bcp(trail_read_pos) {
+                let conflict_lit = self.backtrack()?;
                 trail_read_pos = self.trail.len();
-                if self.make_decision(&mut decisions).is_none() {
-                    return Some(());
-                }
+                self.set_literal(-conflict_lit);
                 continue;
             }
-            let conflict_lit = self.backtrack(&mut decisions)?;
             trail_read_pos = self.trail.len();
-            self.set_literal(-conflict_lit);
+            if self.make_decision().is_none() {
+                return Some(());
+            }
         }
     }
 

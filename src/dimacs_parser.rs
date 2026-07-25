@@ -16,9 +16,11 @@ pub fn from_reader(reader: impl BufRead) -> Result<Solver> {
     for (idx, line_maybe) in reader.lines().enumerate() {
         let line = line_maybe.with_context(|| format!("{}: ", idx + 1))?;
         match parse_line(line)? {
-            Some(clause) => solver
-                .add_clause(&clause, 0usize)
-                .ok_or(anyhow!("{}: clause trivially UNSAT", idx + 1))?,
+            Some(clause) => {
+                solver
+                    .add_clause(&clause, 0usize)
+                    .ok_or(anyhow!("{}: clause trivially UNSAT", idx + 1))?;
+            }
             None => continue,
         }
     }
