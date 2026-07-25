@@ -324,7 +324,7 @@ impl Solver {
             "Short clauses should never be entered into the ClauseDB - they are stored as blocking literals only"
         );
         if self.clauses.ensure_falsified_at_pos1(clause, falsified_lit).is_none() {
-            return Some(());  // Triggered by a stale watch, so ignore it.
+            return Some(()); // Triggered by a stale watch, so ignore it.
         }
         let blocking_literal = self.clauses.literals(clause)[0];
         let blocking_state = self.literal_state(blocking_literal);
