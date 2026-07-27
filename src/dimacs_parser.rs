@@ -18,7 +18,7 @@ pub fn from_reader(reader: impl BufRead) -> Result<Solver> {
         match parse_line(line)? {
             Some(clause) => {
                 solver
-                    .add_clause(&clause, 0usize)
+                    .add_clause(&clause)
                     .ok_or(anyhow!("{}: clause trivially UNSAT", idx + 1))?;
             }
             None => continue,

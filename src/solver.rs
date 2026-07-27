@@ -433,8 +433,8 @@ impl Solver {
     fn backtrack(&mut self) -> Option<Lit> {
         let target_trail = self.trail_lim.pop()?;
         let decision_lit = self.trail[target_trail];
-        while target_trail >= self.trail.len() {
-            let assigned_lit = *self.trail.last().unwrap();
+        while target_trail < self.trail.len() {
+            let assigned_lit = self.trail.pop().unwrap();
             let assigned_var = var_of(assigned_lit).expect("invalid literal");
             self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
         }
