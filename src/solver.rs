@@ -240,7 +240,7 @@ pub struct Solver {
     clauses: ClauseDb,
     watchers: WatchersDb,
     variables: VariableDb,
-    decisions: Vec<Lit>,
+    trail_lim: Vec<usize>,  // The trail-indices where decisions were made
     trail: Vec<Lit>,
 }
 
@@ -272,13 +272,9 @@ impl Solver {
     /// Some(NULL_CLAUSE) means that the clause impacted the state but doesn't have an ID.
     /// For example, if it was propagated immediately to variables' assignment state.
     #[must_use]
-    pub fn add_clause(&mut self, lits: &[Lit], decision_level: usize) -> Option<ClauseId> {
+    pub fn add_clause(&mut self, lits: &[Lit]) -> Option<ClauseId> {
         // This function has to be rewritten once we have CDCL.
         // Watches should be added differently, when we add clauses on decision level > 0.
-        assert!(
-            decision_level == 0,
-            "adding clauses at decision level > 0 is not supported yet"
-        );
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.variables.ensure_vars(max_var);
@@ -428,26 +424,25 @@ impl Solver {
     #[must_use]
     fn make_decision(&mut self) -> Option<()> {
         let choice = -self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
-        self.decisions.push(choice);
+        self.trail_lim.push(self.trail.len());
         self.set_literal(choice);
         Some(())
     }
 
     #[must_use]
     fn backtrack(&mut self) -> Option<Lit> {
-        let decision_lit = self.decisions.pop()?;
-        while let Some(assigned_lit) = self.trail.pop() {
+        let target_trail = self.trail_lim.pop()?;
+        let decision_lit = self.trail[target_trail];
+        while target_trail >= self.trail.len() {
+            let assigned_lit = *self.trail.last().unwrap();
             let assigned_var = var_of(assigned_lit).expect("invalid literal");
             self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
-            if assigned_lit == decision_lit {
-                break;
-            }
         }
         Some(decision_lit)
     }
     #[must_use]
     fn solve_loop(&mut self) -> Option<()> {
-        self.decisions.clear();
+        self.trail_lim.clear();
         let mut trail_read_pos = 0;
         loop {
             if let Some(_conflict_reason) = self.bcp(trail_read_pos) {
