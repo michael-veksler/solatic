@@ -240,7 +240,7 @@ pub struct Solver {
     clauses: ClauseDb,
     watchers: WatchersDb,
     variables: VariableDb,
-    trail_lim: Vec<usize>,  // The trail-indices where decisions were made
+    trail_lim: Vec<usize>, // The trail-indices where decisions were made
     trail: Vec<Lit>,
 }
 
