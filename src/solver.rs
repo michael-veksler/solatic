@@ -255,7 +255,6 @@ fn is_pos(lit: Lit) -> bool {
 #[derive(Default)]
 pub struct ConflictInfo {
     frontier: Vec<Lit>,
-    seen: Vec<u8>,
     level: u32,
     num_lit_in_level: usize,
     latest_non_uip: usize,
@@ -263,8 +262,7 @@ pub struct ConflictInfo {
 }
 
 impl ConflictInfo {
-    pub fn init(&mut self, variables: &VariableDb, trail_lim: &[usize], conflict_literals: &[Lit]) {
-        self.seen.resize(variables.len(), 0);
+    pub fn init(&mut self, variables: &mut VariableDb, trail_lim: &[usize], conflict_literals: &[Lit]) {
         self.frontier.clear();
         self.level = trail_lim.len() as u32;
         self.latest_non_uip_level = 0;
@@ -272,7 +270,7 @@ impl ConflictInfo {
         self.num_lit_in_level = 0;
         for &lit in conflict_literals {
             if let Some(var) = var_of(lit) {
-                self.seen[var] = 1;
+                variables.set_seen(var, Assignment::from(lit));
                 let lit_level = variables.history[var].level;
                 debug_assert!(
                     lit_level <= self.level,
@@ -293,23 +291,7 @@ impl ConflictInfo {
             }
         }
     }
-    pub fn clear_seen_frontier(&mut self) {
-        for &lit in &self.frontier {
-            if let Some(var) = var_of(lit) {
-                self.seen[var] = 0;
-            }
-        }
-    }
-    pub fn is_seen(&self, var: usize) -> bool {
-        self.seen[var] != 0
-    }
-    pub fn set_seen(&mut self, var: usize) {
-        self.seen[var] = 1;
-    }
-    pub fn clear_seen(&mut self, var: usize) {
-        self.seen[var] = 0;
-    }
-    pub fn resolve(&mut self, variables: &VariableDb, literals: &[Lit], pivot: Lit) {
+    pub fn resolve(&mut self, variables: &mut VariableDb, literals: &[Lit], pivot: Lit) {
         for &clause_lit in literals {
             let var;
             if let Some(lit_var) = var_of(clause_lit) {
@@ -319,13 +301,13 @@ impl ConflictInfo {
             }
             if clause_lit == pivot {
                 self.num_lit_in_level -= 1;
-                self.clear_seen(var);
+                variables.reset_seen(var);
                 continue;
             }
-            if self.is_seen(var) {
+            if !variables.get_seen(var).is_empty() {
                 continue;
             }
-            self.set_seen(var);
+            variables.set_seen(var, Assignment::from(clause_lit));
             let clause_lit_level = variables.history[var].level;
             if clause_lit_level == self.level {
                 self.num_lit_in_level += 1;
@@ -335,18 +317,18 @@ impl ConflictInfo {
                 self.latest_non_uip = self.frontier.len();
                 self.latest_non_uip_level = clause_lit_level;
             }
-            self.set_seen(var);
+            variables.set_seen(var, Assignment::from(clause_lit));
             self.frontier.push(clause_lit);
         }
     }
-    pub fn find_trail_index_before(&self, variables: &VariableDb, trail: &[Lit], trail_index: usize) -> usize {
+    pub fn find_trail_index_before(&self, variables: &mut VariableDb, trail: &[Lit], trail_index: usize) -> usize {
         // find 1-UIP
         for trail_index in (0..=trail_index).rev() {
             let trail_lit = trail[trail_index];
             let trail_var = var_of(trail_lit).unwrap();
             debug_assert!(variables.history[trail_var].level == self.level);
             if let Some(var) = var_of(trail_lit) {
-                if self.is_seen(var) {
+                if !variables.get_seen(var).is_empty() {
                     return trail_index;
                 }
             }
@@ -397,6 +379,13 @@ impl VariableDb {
     fn reset_seen(&mut self, var: usize) {
         self.seen_in_clause[var] = Assignment::empty();
     }
+    fn reset_seen_literals(&mut self, literals: &[Lit]) {
+        for &lit in literals {
+            if let Some(var) = var_of(lit) {
+                self.reset_seen(var);
+            }
+        }
+    }
 }
 #[derive(Default)]
 pub struct Solver {
@@ -405,7 +394,6 @@ pub struct Solver {
     variables: VariableDb,
     trail_lim: Vec<usize>, // The trail-indices where decisions were made
     trail: Vec<Lit>,
-    seen: Vec<u8>,
     conflict_cache: ConflictInfo,
 }
 
@@ -446,9 +434,6 @@ impl Solver {
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.variables.ensure_vars(max_var);
-            if self.seen.len() <= max_var {
-                self.seen.resize(max_var + 1, 0);
-            }
         }
         let clause_id = self.clauses.push(lits, &mut self.variables);
         if clause_id == NULL_CLAUSE {
@@ -618,11 +603,10 @@ impl Solver {
     #[must_use]
     fn make_conflict_clause(&mut self, conflicting_clause_id: ClauseId) -> ConflictInfo {
         let mut conflict_info = std::mem::take(&mut self.conflict_cache);
-        conflict_info.seen = std::mem::take(&mut self.seen);
 
         let conflicting_clause = self.clauses.get(conflicting_clause_id);
         conflict_info.init(
-            &self.variables,
+            &mut self.variables,
             &self.trail_lim,
             self.clauses.literals(conflicting_clause),
         );
@@ -640,19 +624,19 @@ impl Solver {
             trail_index -= 1;
             let trail_lit = self.trail[trail_index];
             let trail_var = var_of(trail_lit).unwrap();
-            if !conflict_info.is_seen(trail_var) {
+            if self.variables.get_seen(trail_var).is_empty() {
                 continue;
             }
             debug_assert!(self.variables.history[trail_var].level == conflict_info.level);
             let reason = self.variables.history[trail_var].reason;
             assert!(reason != NULL_CLAUSE);
             let clause = self.clauses.get(reason);
-            conflict_info.resolve(&self.variables, self.clauses.literals(clause), trail_lit);
+            conflict_info.resolve(&mut self.variables, self.clauses.literals(clause), trail_lit);
         }
         let trail_lim_index = *self.trail_lim.last().unwrap();
 
         debug_assert!(trail_index != 0);
-        let trail_uip = conflict_info.find_trail_index_before(&self.variables, &self.trail, trail_index - 1);
+        let trail_uip = conflict_info.find_trail_index_before(&mut self.variables, &self.trail, trail_index - 1);
         debug_assert!(
             trail_uip >= trail_lim_index,
             "1-UIP must be found at >= trail_lim_index"
@@ -668,8 +652,7 @@ impl Solver {
             conflict_info.frontier.push(-uip_lit);
         }
 
-        conflict_info.clear_seen_frontier();
-        self.seen = std::mem::take(&mut conflict_info.seen);
+        self.variables.reset_seen_literals(&conflict_info.frontier);
         conflict_info
     }
 
