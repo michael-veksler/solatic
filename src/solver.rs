@@ -284,13 +284,13 @@ impl VariableDb {
         debug_assert!(self.values.len() == self.history.len());
         self.values.len()
     }
-    fn get_seen(&self, var:usize) -> Assignment {
+    fn get_seen(&self, var: usize) -> Assignment {
         self.seen_in_clause[var]
     }
-    fn set_seen(&mut self, var:usize, seen:Assignment) {
+    fn set_seen(&mut self, var: usize, seen: Assignment) {
         self.seen_in_clause[var] = seen;
     }
-    fn reset_seen(&mut self, var:usize) {
+    fn reset_seen(&mut self, var: usize) {
         self.seen_in_clause[var] = Assignment::empty();
     }
 }
