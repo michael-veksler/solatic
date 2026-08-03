@@ -40,13 +40,51 @@ impl ClauseDb {
         self.offsets.is_empty()
     }
 
-    pub fn push(&mut self, lits: &[Lit]) -> ClauseId {
+    /// Push unique literals into the DB.
+    ///
+    /// Return: the id of the inserted clause
+    ///         NULL_CLAUSE if the clause was a tautology and thus ignored.
+    ///         Any other clause, including the empty clause, is returned as a valid clause id.
+    pub fn push(&mut self, lits: &[Lit], variables: &mut VariableDb) -> ClauseId {
         let clause_id = self.offsets.len() as ClauseId;
-        self.offsets.push(self.pool.len());
+        let clause_start = self.pool.len();
+        self.offsets.push(clause_start);
         let stored_size: Lit = lits.len().try_into().expect("clause too long");
         self.pool.push(stored_size);
-        self.pool.extend_from_slice(lits);
-        clause_id
+        let literal_start = self.pool.len();
+        let mut is_tautology = false;
+        for &lit in lits {
+            let var = var_of(lit).expect("invalid literal");
+            let next_seen: Assignment = lit.into();
+            if variables.get_seen(var) == next_seen {
+                continue; // a simple duplicate - to ignore
+            }
+            if variables.get_seen(var) != Assignment::empty() {
+                is_tautology = true;
+                break;
+            }
+            variables.set_seen(var, next_seen);
+            self.pool.push(lit);
+        }
+        for i in literal_start..self.pool.len() {
+            let lit = self.pool[i];
+            let var = var_of(lit).expect("invalid literal");
+            variables.reset_seen(var);
+        }
+        if is_tautology {
+            self.offsets.pop();
+            self.pool.truncate(clause_start);
+            NULL_CLAUSE
+        } else {
+            self.pool[clause_start] = (self.pool.len() - literal_start) as Lit;
+            clause_id
+        }
+    }
+
+    fn drop_last_clause(&mut self) {
+        if let Some(last_offset) = self.offsets.pop() {
+            self.pool.truncate(last_offset);
+        }
     }
 
     pub fn get(&self, id: ClauseId) -> ClauseAccessor {
@@ -112,11 +150,20 @@ impl Assignment {
     }
 }
 impl From<bool> for Assignment {
-    fn from(b: bool) -> Self {
+    fn from(b: bool) -> Assignment {
         if b {
             Assignment::POSITIVE
         } else {
             Assignment::NEGATIVE
+        }
+    }
+}
+impl From<Lit> for Assignment {
+    fn from(lit: Lit) -> Assignment {
+        match lit {
+            0 => Assignment::empty(),
+            _ if lit > 0 => Assignment::POSITIVE,
+            _ => Assignment::NEGATIVE,
         }
     }
 }
@@ -211,9 +258,11 @@ struct AssignmentHistory {
 }
 
 #[derive(Default)]
-struct VariableDb {
+pub struct VariableDb {
     values: Vec<Assignment>,
     history: Vec<AssignmentHistory>,
+    // Invariant: When not in clause construction, seen_in_clause[i] == Assignment::empty()
+    seen_in_clause: Vec<Assignment>, // empty() = not seen
 }
 
 impl VariableDb {
@@ -221,6 +270,7 @@ impl VariableDb {
         if var >= self.len() {
             self.values.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
             self.history.resize(var + 1, AssignmentHistory { trail_index: 0 });
+            self.seen_in_clause.resize(var + 1, Assignment::empty());
         }
     }
 
@@ -233,6 +283,15 @@ impl VariableDb {
     fn len(&self) -> usize {
         debug_assert!(self.values.len() == self.history.len());
         self.values.len()
+    }
+    fn get_seen(&self, var:usize) -> Assignment {
+        self.seen_in_clause[var]
+    }
+    fn set_seen(&mut self, var:usize, seen:Assignment) {
+        self.seen_in_clause[var] = seen;
+    }
+    fn reset_seen(&mut self, var:usize) {
+        self.seen_in_clause[var] = Assignment::empty();
     }
 }
 #[derive(Default)]
@@ -269,26 +328,31 @@ impl Solver {
     /// Add a clause, and on success return its ClauseId
     ///
     /// None means there was a conflict, i.e., an empty clause inserted
-    /// Some(NULL_CLAUSE) means that the clause impacted the state but doesn't have an ID.
-    /// For example, if it was propagated immediately to variables' assignment state.
+    /// Some(NULL_CLAUSE) means that the clause was accounter for without recording a regular clause.
+    /// Possible cases for Some(NULL_CLAUSE):For example, if it was propagated immediately to variables' assignment state.
+    ///  - The clause was propagated immediately to variables
+    ///  - The clause was a tautology, and thus ignored
     #[must_use]
     pub fn add_clause(&mut self, lits: &[Lit]) -> Option<ClauseId> {
-        // This function has to be rewritten once we have CDCL.
-        // Watches should be added differently, when we add clauses on decision level > 0.
+        if lits.is_empty() {
+            return None;
+        }
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.variables.ensure_vars(max_var);
         }
-        match lits.len() {
-            0 => None,
-            1 => {
-                self.set_literal(lits[0]);
-                Some(NULL_CLAUSE)
-            }
-            _ => {
-                self.clauses.push(lits);
-                Some(self.clauses.len() as ClauseId - 1)
-            }
+        let clause_id = self.clauses.push(lits, &mut self.variables);
+        if clause_id == NULL_CLAUSE {
+            return Some(NULL_CLAUSE);
+        }
+        let num_lits = self.clauses.get(clause_id).len();
+        if num_lits == 1 {
+            let lit = self.clauses.literals(self.clauses.get(clause_id))[0];
+            self.clauses.drop_last_clause();
+            self.set_literal(lit);
+            Some(NULL_CLAUSE)
+        } else {
+            Some(clause_id)
         }
     }
 
@@ -508,26 +572,40 @@ mod tests {
     fn test_clause_db() {
         let mut db = ClauseDb::default();
         let cl0 = [1, 2, 3, 4];
-        let cl1 = [-1, -2, -3];
-        let cl2 = [];
-        let cl3 = [-5];
-        db.push(cl0.as_slice());
-        db.push(cl1.as_slice());
-        db.push(cl2.as_slice());
-        db.push(cl3.as_slice());
-        assert_eq!(db.literals(db.get(0)), &cl0);
-        assert_eq!(db.literals(db.get(1)), &cl1);
-        assert_eq!(db.literals(db.get(2)), &cl2);
-        assert_eq!(db.literals(db.get(3)), &cl3);
+        let cl0_tautology = [1, 2, 3, -2, 5, 7];
+        let cl2 = [-1, -2, -3];
+        let cl3 = [1, 2, 1, 2, 3, -4, 5, -4];
+        let cl3_compact = [1, 2, 3, -4, 5];
+        let cl4 = [];
+        let cl5 = [-5];
+        let mut variables = VariableDb::default();
+        variables.ensure_vars(9);
+        let clause_id0 = db.push(cl0.as_slice(), &mut variables);
+        assert_eq!(clause_id0, 0);
+        let clause_id0_tautology = db.push(cl0_tautology.as_slice(), &mut variables);
+        assert_eq!(clause_id0_tautology, NULL_CLAUSE);
+        let clause_id2 = db.push(cl2.as_slice(), &mut variables);
+        assert_eq!(clause_id2, 1);
+        let clause_id3 = db.push(cl3.as_slice(), &mut variables);
+        assert_eq!(clause_id3, 2);
+        let clause_id4 = db.push(cl4.as_slice(), &mut variables);
+        assert_eq!(clause_id4, 3);
+        let clause_id5 = db.push(cl5.as_slice(), &mut variables);
+        assert_eq!(clause_id5, 4);
+        assert_eq!(db.literals(db.get(clause_id0)), &cl0);
+        assert_eq!(db.literals(db.get(clause_id2)), &cl2);
+        assert_eq!(db.literals(db.get(clause_id3)), &cl3_compact);
+        assert_eq!(db.literals(db.get(clause_id4)), &cl4);
+        assert_eq!(db.literals(db.get(clause_id5)), &cl5);
 
-        let c4 = [5, 6];
-        db.push(c4.as_slice());
-        assert_eq!(db.literals(db.get(4)), &c4);
-        assert!(db.literals(db.get(2)).is_empty());
-        assert!(!db.literals(db.get(0)).is_empty());
+        let c6 = [5, 6];
+        let clause_id6 = db.push(c6.as_slice(), &mut variables);
+        assert_eq!(db.literals(db.get(clause_id6)), &c6);
+        assert!(db.literals(db.get(clause_id4)).is_empty());
+        assert!(!db.literals(db.get(clause_id0)).is_empty());
 
-        db.literals_mut(db.get(4))[0] = 8;
-        assert_eq!(db.literals(db.get(4)), &[8, 6]);
+        db.literals_mut(db.get(clause_id6))[0] = 8;
+        assert_eq!(db.literals(db.get(clause_id6)), &[8, 6]);
     }
 
     #[test]

@@ -61,3 +61,20 @@ fn conflict_is_unsat() -> anyhow::Result<()> {
     assert_eq!(solver.solve(), SolveResult::Unsat);
     Ok(())
 }
+
+#[test]
+fn repeated_literals() -> anyhow::Result<()> {
+    let mut solver = Solver::new();
+    let unexpected = || anyhow!("unexpected");
+    solver.add_clause(&[-1, -1, -1]).ok_or_else(unexpected)?;
+    solver.add_clause(&[2, -1]).ok_or_else(unexpected)?;
+    solver.add_clause(&[1, -3, 3]).ok_or_else(unexpected)?; // tautology
+    solver.add_clause(&[2, 3, 3]).ok_or_else(unexpected)?;
+    solver.add_clause(&[1, 1, 3]).ok_or_else(unexpected)?;
+    solver.add_clause(&[1, -3, -1]).ok_or_else(unexpected)?; // tautology
+    assert_eq!(solver.solve(), SolveResult::Sat);
+    assert_eq!(solver.value_of(1), Some(false));
+    // V2 can be anything
+    assert_eq!(solver.value_of(3), Some(true));
+    Ok(())
+}
