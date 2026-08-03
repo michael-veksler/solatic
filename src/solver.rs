@@ -40,13 +40,45 @@ impl ClauseDb {
         self.offsets.is_empty()
     }
 
-    pub fn push(&mut self, lits: &[Lit]) -> ClauseId {
+    pub fn push(&mut self, lits: &[Lit], seen: &mut [u8]) -> ClauseId {
         let clause_id = self.offsets.len() as ClauseId;
-        self.offsets.push(self.pool.len());
+        let clause_start = self.pool.len();
+        self.offsets.push(clause_start);
         let stored_size: Lit = lits.len().try_into().expect("clause too long");
         self.pool.push(stored_size);
-        self.pool.extend_from_slice(lits);
-        clause_id
+        let literal_start = self.pool.len();
+        let mut is_tautology = false;
+        for &lit in lits {
+            let var = var_of(lit).expect("invalid literal");
+            let next_seen = if lit > 0 { 1 } else { 2 };
+            if seen[var] == next_seen {
+                continue; // a simple duplicate - to ignore
+            }
+            if seen[var] != 0 {
+                is_tautology = true;
+                break;
+            }
+            seen[var] = next_seen;
+            self.pool.push(lit);
+        }
+        for i in literal_start..self.pool.len() {
+            let lit = self.pool[i];
+            let var = var_of(lit).expect("invalid literal");
+            seen[var] = 0;
+        }
+        if is_tautology {
+            self.offsets.pop();
+            self.pool.truncate(clause_start);
+            NULL_CLAUSE
+        } else {
+            self.pool[clause_start] = (self.pool.len() - literal_start) as Lit;
+            clause_id
+        }
+    }
+    fn drop_last_clause(&mut self) {
+        if let Some(last_offset) = self.offsets.pop() {
+            self.pool.truncate(last_offset);
+        }
     }
 
     pub fn get(&self, id: ClauseId) -> ClauseAccessor {
@@ -205,13 +237,117 @@ fn is_pos(lit: Lit) -> bool {
     lit > 0
 }
 
+#[derive(Default)]
+pub struct ConflictInfo {
+    frontier: Vec<Lit>,
+    seen: Vec<u8>,
+    level: u32,
+    num_lit_in_level: usize,
+    latest_non_uip: usize,
+    latest_non_uip_level: u32,
+}
+
+impl ConflictInfo {
+    pub fn init(&mut self, variables: &VariableDb, trail_lim: &[usize], conflict_literals: &[Lit]) {
+        self.seen.resize(variables.len(), 0);
+        self.frontier.clear();
+        self.level = trail_lim.len() as u32;
+        self.latest_non_uip_level = 0;
+        self.latest_non_uip = 0;
+        self.num_lit_in_level = 0;
+        for &lit in conflict_literals {
+            if let Some(var) = var_of(lit) {
+                self.seen[var] = 1;
+                let lit_level = variables.history[var].level;
+                debug_assert!(
+                    lit_level <= self.level,
+                    "conflict literal {} has level {} but current level is {}",
+                    lit,
+                    lit_level,
+                    self.level
+                );
+                if lit_level == self.level {
+                    self.num_lit_in_level += 1;
+                } else {
+                    if self.latest_non_uip_level < lit_level {
+                        self.latest_non_uip_level = lit_level;
+                        self.latest_non_uip = self.frontier.len();
+                    }
+                    self.frontier.push(lit);
+                }
+            }
+        }
+    }
+    pub fn clear_seen_frontier(&mut self) {
+        for &lit in &self.frontier {
+            if let Some(var) = var_of(lit) {
+                self.seen[var] = 0;
+            }
+        }
+    }
+    pub fn is_seen(&self, var: usize) -> bool {
+        self.seen[var] != 0
+    }
+    pub fn set_seen(&mut self, var: usize) {
+        self.seen[var] = 1;
+    }
+    pub fn clear_seen(&mut self, var: usize) {
+        self.seen[var] = 0;
+    }
+    pub fn resolve(&mut self, variables: &VariableDb, literals: &[Lit], pivot: Lit) {
+        for &clause_lit in literals {
+            let var;
+            if let Some(lit_var) = var_of(clause_lit) {
+                var = lit_var;
+            } else {
+                continue;
+            }
+            if clause_lit == pivot {
+                self.num_lit_in_level -= 1;
+                self.clear_seen(var);
+                continue;
+            }
+            if self.is_seen(var) {
+                continue;
+            }
+            self.set_seen(var);
+            let clause_lit_level = variables.history[var].level;
+            if clause_lit_level == self.level {
+                self.num_lit_in_level += 1;
+                continue;
+            }
+            if clause_lit_level > self.latest_non_uip_level {
+                self.latest_non_uip = self.frontier.len();
+                self.latest_non_uip_level = clause_lit_level;
+            }
+            self.set_seen(var);
+            self.frontier.push(clause_lit);
+        }
+    }
+    pub fn find_trail_index_before(&self, variables: &VariableDb, trail: &[Lit], trail_index: usize) -> usize {
+        // find 1-UIP
+        for trail_index in (0..=trail_index).rev() {
+            let trail_lit = trail[trail_index];
+            let trail_var = var_of(trail_lit).unwrap();
+            debug_assert!(variables.history[trail_var].level == self.level);
+            if let Some(var) = var_of(trail_lit) {
+                if self.is_seen(var) {
+                    return trail_index;
+                }
+            }
+        }
+        0
+    }
+}
+
 #[derive(Clone, Copy)]
 struct AssignmentHistory {
-    trail_index: u32,
+    reason: Reason,
+    level: u32,
 }
 
 #[derive(Default)]
-struct VariableDb {
+pub struct VariableDb {
     values: Vec<Assignment>,
     history: Vec<AssignmentHistory>,
 }
@@ -220,7 +356,7 @@ impl VariableDb {
     fn ensure_vars(&mut self, var: usize) {
         if var >= self.len() {
             self.values.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
-            self.history.resize(var + 1, AssignmentHistory { trail_index: 0 });
+            self.history.resize(var + 1, AssignmentHistory { reason: 0, level: 0 });
         }
     }
 
@@ -242,6 +378,8 @@ pub struct Solver {
     variables: VariableDb,
     trail_lim: Vec<usize>, // The trail-indices where decisions were made
     trail: Vec<Lit>,
+    seen: Vec<u8>,
+    conflict_cache: ConflictInfo,
 }
 
 impl Solver {
@@ -269,26 +407,34 @@ impl Solver {
     /// Add a clause, and on success return its ClauseId
     ///
     /// None means there was a conflict, i.e., an empty clause inserted
-    /// Some(NULL_CLAUSE) means that the clause impacted the state but doesn't have an ID.
-    /// For example, if it was propagated immediately to variables' assignment state.
+    /// Some(NULL_CLAUSE) means that the clause was accounter for without recording a regular clause.
+    /// Possible cases for Some(NULL_CLAUSE):For example, if it was propagated immediately to variables' assignment state.
+    ///  - The clause was propagated immediately to variables
+    ///  - The clause was a tautology, and thus ignored
     #[must_use]
     pub fn add_clause(&mut self, lits: &[Lit]) -> Option<ClauseId> {
-        // This function has to be rewritten once we have CDCL.
-        // Watches should be added differently, when we add clauses on decision level > 0.
+        if lits.is_empty() {
+            return None;
+        }
         let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
         if let Some(max_var) = opt_max_var {
             self.variables.ensure_vars(max_var);
+            if self.seen.len() <= max_var {
+                self.seen.resize(max_var + 1, 0);
+            }
         }
-        match lits.len() {
-            0 => None,
-            1 => {
-                self.set_literal(lits[0]);
-                Some(NULL_CLAUSE)
-            }
-            _ => {
-                self.clauses.push(lits);
-                Some(self.clauses.len() as ClauseId - 1)
-            }
+        let clause_id = self.clauses.push(lits, &mut self.seen);
+        if clause_id == NULL_CLAUSE {
+            return Some(NULL_CLAUSE);
+        }
+        let num_lits = self.clauses.get(clause_id).len();
+        if num_lits == 1 {
+            let lit = self.clauses.literals(self.clauses.get(clause_id))[0];
+            self.clauses.drop_last_clause();
+            self.set_literal(lit, NULL_CLAUSE);
+            Some(NULL_CLAUSE)
+        } else {
+            Some(clause_id)
         }
     }
 
@@ -335,7 +481,7 @@ impl Solver {
         } else if blocking_state == Assignment::NEGATIVE {
             None
         } else {
-            self.set_literal(blocking_literal);
+            self.set_literal(blocking_literal, clause_id);
             Some(())
         }
     }
@@ -352,11 +498,14 @@ impl Solver {
         Some(())
     }
 
-    fn set_literal(&mut self, lit: Lit) {
+    fn set_literal(&mut self, lit: Lit, reason: Reason) {
         let var = var_of(lit).expect("invalid literal");
 
         self.variables.set_value(var, Assignment::from(is_pos(lit)));
-        self.variables.history[var].trail_index = self.trail.len() as u32;
+        self.variables.history[var] = AssignmentHistory {
+            reason,
+            level: self.trail_lim.len() as u32,
+        };
         self.trail.push(lit);
     }
     /// Propagate all newly modified literals
@@ -425,30 +574,123 @@ impl Solver {
     fn make_decision(&mut self) -> Option<()> {
         let choice = -self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
         self.trail_lim.push(self.trail.len());
-        self.set_literal(choice);
+        self.set_literal(choice, NULL_CLAUSE);
         Some(())
     }
 
-    #[must_use]
-    fn backtrack(&mut self) -> Option<Lit> {
-        let target_trail = self.trail_lim.pop()?;
-        let decision_lit = self.trail[target_trail];
+    fn backjump(&mut self, level: usize) {
+        let target_trail = self.trail_lim[level];
+        self.trail_lim.truncate(level);
         while target_trail < self.trail.len() {
             let assigned_lit = self.trail.pop().unwrap();
             let assigned_var = var_of(assigned_lit).expect("invalid literal");
             self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
         }
-        Some(decision_lit)
+    }
+
+    #[must_use]
+    fn make_conflict_clause(&mut self, conflicting_clause_id: ClauseId) -> ConflictInfo {
+        let mut conflict_info = std::mem::take(&mut self.conflict_cache);
+        conflict_info.seen = std::mem::take(&mut self.seen);
+
+        let conflicting_clause = self.clauses.get(conflicting_clause_id);
+        conflict_info.init(
+            &self.variables,
+            &self.trail_lim,
+            self.clauses.literals(conflicting_clause),
+        );
+        debug_assert!(
+            !self.trail.is_empty(),
+            "If all invariants were kept, the trail should not have been empty"
+        );
+        let mut trail_index = self.trail.len();
+        // generate conflict clause
+        while conflict_info.num_lit_in_level > 1 {
+            debug_assert!(
+                trail_index > 0,
+                "If all invariants were kept, we should stop before exhausting the trail"
+            );
+            trail_index -= 1;
+            let trail_lit = self.trail[trail_index];
+            let trail_var = var_of(trail_lit).unwrap();
+            if !conflict_info.is_seen(trail_var) {
+                continue;
+            }
+            debug_assert!(self.variables.history[trail_var].level == conflict_info.level);
+            let reason = self.variables.history[trail_var].reason;
+            assert!(reason != NULL_CLAUSE);
+            let clause = self.clauses.get(reason);
+            conflict_info.resolve(&self.variables, self.clauses.literals(clause), trail_lit);
+        }
+        let trail_lim_index = *self.trail_lim.last().unwrap();
+
+        debug_assert!(trail_index != 0);
+        let trail_uip = conflict_info.find_trail_index_before(&self.variables, &self.trail, trail_index - 1);
+        debug_assert!(
+            trail_uip >= trail_lim_index,
+            "1-UIP must be found at >= trail_lim_index"
+        );
+        let uip_lit = self.trail[trail_uip];
+        if !conflict_info.frontier.is_empty() {
+            conflict_info.frontier.swap(conflict_info.latest_non_uip, 0);
+            conflict_info.latest_non_uip = 0;
+            let last_idx = conflict_info.frontier.len();
+            conflict_info.frontier.push(-uip_lit);
+            conflict_info.frontier.swap(last_idx, 1);
+        } else {
+            conflict_info.frontier.push(-uip_lit);
+        }
+
+        conflict_info.clear_seen_frontier();
+        self.seen = std::mem::take(&mut conflict_info.seen);
+        conflict_info
+    }
+
+    #[must_use]
+    fn handle_conflict(&mut self, conflicting_clause: ClauseId) -> Option<()> {
+        if self.trail_lim.is_empty() {
+            return None;
+        }
+        let conflict_info = self.make_conflict_clause(conflicting_clause);
+        if conflict_info.frontier.len() == 1 {
+            let uip_lit = conflict_info.frontier[0];
+            self.backjump(0);
+            self.set_literal(uip_lit, NULL_CLAUSE);
+            return Some(());
+        }
+        let conflict_clause_id = self.add_clause(&conflict_info.frontier)?;
+        self.watchers.add_watch(
+            conflict_info.frontier[0],
+            Watcher {
+                clause: conflict_clause_id,
+            },
+        );
+        let uip_lit = conflict_info.frontier[0];
+        if conflict_info.frontier.len() > 1 {
+            self.watchers.add_watch(
+                conflict_info.frontier[1],
+                Watcher {
+                    clause: conflict_clause_id,
+                },
+            );
+        }
+
+        self.backjump(conflict_info.latest_non_uip_level as usize);
+        self.conflict_cache = conflict_info;
+        if conflict_clause_id == NULL_CLAUSE {
+            return Some(());
+        }
+        let conflict_clause = self.clauses.get(conflict_clause_id);
+        self.propagate_clause(conflict_clause_id, conflict_clause, -uip_lit)
     }
     #[must_use]
     fn solve_loop(&mut self) -> Option<()> {
         self.trail_lim.clear();
         let mut trail_read_pos = 0;
         loop {
-            if let Some(_conflict_reason) = self.bcp(trail_read_pos) {
-                let conflict_lit = self.backtrack()?;
-                trail_read_pos = self.trail.len();
-                self.set_literal(-conflict_lit);
+            if let Some(conflict_reason) = self.bcp(trail_read_pos) {
+                self.handle_conflict(conflict_reason)?;
+                trail_read_pos = self.trail.len() - 1;
                 continue;
             }
             trail_read_pos = self.trail.len();
@@ -508,26 +750,31 @@ mod tests {
     fn test_clause_db() {
         let mut db = ClauseDb::default();
         let cl0 = [1, 2, 3, 4];
-        let cl1 = [-1, -2, -3];
-        let cl2 = [];
-        let cl3 = [-5];
-        db.push(cl0.as_slice());
-        db.push(cl1.as_slice());
-        db.push(cl2.as_slice());
-        db.push(cl3.as_slice());
+        let cl2 = [-1, -2, -3];
+        let cl3 = [];
+        let cl4 = [-5];
+        let mut seen = [0; 9];
+        db.push(cl0.as_slice(), &mut seen);
+        db.push(&[1, 2, 1, 2, 3, -4, 5, -4], &mut seen); // should coalesce to [1, 2, 3, -4, 5]
+        db.push(cl2.as_slice(), &mut seen);
+        db.push(&[1, 2, 3, -1], &mut seen); // tautology, should be ignored
+        db.push(cl3.as_slice(), &mut seen);
+        db.push(&[1, -2, 3, 2, 4], &mut seen); // tautology, should be ignored
+        db.push(cl4.as_slice(), &mut seen);
         assert_eq!(db.literals(db.get(0)), &cl0);
-        assert_eq!(db.literals(db.get(1)), &cl1);
+        assert_eq!(db.literals(db.get(1)), &[1, 2, 3, -4, 5]);
         assert_eq!(db.literals(db.get(2)), &cl2);
         assert_eq!(db.literals(db.get(3)), &cl3);
+        assert_eq!(db.literals(db.get(4)), &cl4);
 
-        let c4 = [5, 6];
-        db.push(c4.as_slice());
-        assert_eq!(db.literals(db.get(4)), &c4);
-        assert!(db.literals(db.get(2)).is_empty());
+        let c5 = [5, 6];
+        db.push(c5.as_slice(), &mut seen);
+        assert_eq!(db.literals(db.get(5)), &c5);
+        assert!(db.literals(db.get(3)).is_empty());
         assert!(!db.literals(db.get(0)).is_empty());
 
-        db.literals_mut(db.get(4))[0] = 8;
-        assert_eq!(db.literals(db.get(4)), &[8, 6]);
+        db.literals_mut(db.get(5))[0] = 8;
+        assert_eq!(db.literals(db.get(5)), &[8, 6]);
     }
 
     #[test]
