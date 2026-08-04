@@ -175,13 +175,13 @@ pub enum SolveResult {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct Watcher {
+pub struct Watcher {
     clause: ClauseId,
 }
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
-struct WatchersDb {
+pub struct WatchersDb {
     // FIXME: Vec<Watch> is not cache friendly.
     //        Better have the size and capacity in the same memory block with the first Watch.
     //        Maybe use unsafe code to manage pointers, or use thin-vec  or thin-dst / erasable
@@ -255,16 +255,16 @@ fn is_pos(lit: Lit) -> bool {
 #[derive(Default)]
 pub struct ConflictInfo {
     frontier: Vec<Lit>,
-    level: u32,
+    decision_level: u32,
     num_lit_in_level: usize,
     latest_non_uip: usize,
     latest_non_uip_level: u32,
 }
 
 impl ConflictInfo {
-    pub fn init(&mut self, variables: &mut VariableDb, trail_lim: &[usize], conflict_literals: &[Lit]) {
+    pub fn new_conflict(&mut self, variables: &mut VariableDb, decision_level: u32, conflict_literals: &[Lit]) {
         self.frontier.clear();
-        self.level = trail_lim.len() as u32;
+        self.decision_level = decision_level;
         self.latest_non_uip_level = 0;
         self.latest_non_uip = 0;
         self.num_lit_in_level = 0;
@@ -273,13 +273,9 @@ impl ConflictInfo {
                 variables.set_seen(var, Assignment::from(lit));
                 let lit_level = variables.history[var].level;
                 debug_assert!(
-                    lit_level <= self.level,
-                    "conflict literal {} has level {} but current level is {}",
-                    lit,
-                    lit_level,
-                    self.level
-                );
-                if lit_level == self.level {
+                    lit_level <= decision_level,
+                    "conflict literal {lit} has level {lit_level} but current level is {decision_level}"                );
+                if lit_level == self.decision_level {
                     self.num_lit_in_level += 1;
                 } else {
                     if self.latest_non_uip_level < lit_level {
@@ -309,7 +305,7 @@ impl ConflictInfo {
             }
             variables.set_seen(var, Assignment::from(clause_lit));
             let clause_lit_level = variables.history[var].level;
-            if clause_lit_level == self.level {
+            if clause_lit_level == self.decision_level {
                 self.num_lit_in_level += 1;
                 continue;
             }
@@ -326,7 +322,7 @@ impl ConflictInfo {
         for trail_index in (0..=trail_index).rev() {
             let trail_lit = trail[trail_index];
             let trail_var = var_of(trail_lit).unwrap();
-            debug_assert!(variables.history[trail_var].level == self.level);
+            debug_assert!(variables.history[trail_var].level == self.decision_level);
             if let Some(var) = var_of(trail_lit) {
                 if !variables.get_seen(var).is_empty() {
                     return trail_index;
@@ -334,6 +330,35 @@ impl ConflictInfo {
             }
         }
         0
+    }
+    pub fn finalize_clause(&mut self, uip_lit: Lit) {
+        let last_frontier_index = self.frontier.len();
+        self.frontier.push(-uip_lit);
+        if last_frontier_index == 0 {
+            return;
+        }
+        self.frontier.swap(0, last_frontier_index);
+        if self.latest_non_uip == 0 {
+            self.latest_non_uip = last_frontier_index;
+        }
+        self.latest_non_uip = 1;
+        self.frontier.swap(self.latest_non_uip, 1);
+    }
+    pub fn add_watches(&self, watchers: &mut WatchersDb, clause_id: ClauseId) {
+        watchers.add_watch(
+            self.frontier[0],
+            Watcher {
+                clause: clause_id,
+            },
+        );
+        if self.frontier.len() > 1 {
+            watchers.add_watch(
+                self.frontier[1],
+                Watcher {
+                    clause: clause_id,
+                },
+            );
+        }
     }
 }
 
@@ -600,20 +625,7 @@ impl Solver {
         }
     }
 
-    #[must_use]
-    fn make_conflict_clause(&mut self, conflicting_clause_id: ClauseId) -> ConflictInfo {
-        let mut conflict_info = std::mem::take(&mut self.conflict_cache);
-
-        let conflicting_clause = self.clauses.get(conflicting_clause_id);
-        conflict_info.init(
-            &mut self.variables,
-            &self.trail_lim,
-            self.clauses.literals(conflicting_clause),
-        );
-        debug_assert!(
-            !self.trail.is_empty(),
-            "If all invariants were kept, the trail should not have been empty"
-        );
+    fn resolve_until_1uip(&mut self, conflict_info: &mut ConflictInfo) -> Lit {
         let mut trail_index = self.trail.len();
         // generate conflict clause
         while conflict_info.num_lit_in_level > 1 {
@@ -627,31 +639,38 @@ impl Solver {
             if self.variables.get_seen(trail_var).is_empty() {
                 continue;
             }
-            debug_assert!(self.variables.history[trail_var].level == conflict_info.level);
+            debug_assert!(self.variables.history[trail_var].level == conflict_info.decision_level);
             let reason = self.variables.history[trail_var].reason;
             assert!(reason != NULL_CLAUSE);
             let clause = self.clauses.get(reason);
             conflict_info.resolve(&mut self.variables, self.clauses.literals(clause), trail_lit);
         }
-        let trail_lim_index = *self.trail_lim.last().unwrap();
-
         debug_assert!(trail_index != 0);
         let trail_uip = conflict_info.find_trail_index_before(&mut self.variables, &self.trail, trail_index - 1);
         debug_assert!(
-            trail_uip >= trail_lim_index,
-            "1-UIP must be found at >= trail_lim_index"
+            trail_uip >= *self.trail_lim.last().unwrap(),
+            "1-UIP must be found at the conflicting level"
         );
-        let uip_lit = self.trail[trail_uip];
-        if !conflict_info.frontier.is_empty() {
-            conflict_info.frontier.swap(conflict_info.latest_non_uip, 0);
-            conflict_info.latest_non_uip = 0;
-            let last_idx = conflict_info.frontier.len();
-            conflict_info.frontier.push(-uip_lit);
-            conflict_info.frontier.swap(last_idx, 1);
-        } else {
-            conflict_info.frontier.push(-uip_lit);
-        }
+        self.trail[trail_uip]
+    }
 
+    #[must_use]
+    fn make_conflict_clause(&mut self, conflicting_clause_id: ClauseId) -> ConflictInfo {
+        let mut conflict_info = std::mem::take(&mut self.conflict_cache);
+
+        let conflicting_clause = self.clauses.get(conflicting_clause_id);
+        conflict_info.new_conflict(
+            &mut self.variables,
+            self.trail_lim.len() as u32,
+            self.clauses.literals(conflicting_clause),
+        );
+        debug_assert!(
+            !self.trail.is_empty(),
+            "If all invariants were kept, the trail should not have been empty"
+        );
+
+        let lit_1uip = self.resolve_until_1uip(&mut conflict_info);
+        conflict_info.finalize_clause(lit_1uip);
         self.variables.reset_seen_literals(&conflict_info.frontier);
         conflict_info
     }
@@ -669,29 +688,16 @@ impl Solver {
             return Some(());
         }
         let conflict_clause_id = self.add_clause(&conflict_info.frontier)?;
-        self.watchers.add_watch(
-            conflict_info.frontier[0],
-            Watcher {
-                clause: conflict_clause_id,
-            },
-        );
-        let uip_lit = conflict_info.frontier[0];
-        if conflict_info.frontier.len() > 1 {
-            self.watchers.add_watch(
-                conflict_info.frontier[1],
-                Watcher {
-                    clause: conflict_clause_id,
-                },
-            );
-        }
+        conflict_info.add_watches(&mut self.watchers, conflict_clause_id);
 
+        let latest_non_uip_lit = conflict_info.frontier[conflict_info.latest_non_uip];
         self.backjump(conflict_info.latest_non_uip_level as usize);
         self.conflict_cache = conflict_info;
         if conflict_clause_id == NULL_CLAUSE {
             return Some(());
         }
         let conflict_clause = self.clauses.get(conflict_clause_id);
-        self.propagate_clause(conflict_clause_id, conflict_clause, -uip_lit)
+        self.propagate_clause(conflict_clause_id, conflict_clause, -latest_non_uip_lit)
     }
     #[must_use]
     fn solve_loop(&mut self) -> Option<()> {
