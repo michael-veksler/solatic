@@ -274,7 +274,8 @@ impl ConflictInfo {
                 let lit_level = variables.history[var].level;
                 debug_assert!(
                     lit_level <= decision_level,
-                    "conflict literal {lit} has level {lit_level} but current level is {decision_level}"                );
+                    "conflict literal {lit} has level {lit_level} but current level is {decision_level}"
+                );
                 if lit_level == self.decision_level {
                     self.num_lit_in_level += 1;
                 } else {
@@ -345,19 +346,9 @@ impl ConflictInfo {
         self.frontier.swap(self.latest_non_uip, 1);
     }
     pub fn add_watches(&self, watchers: &mut WatchersDb, clause_id: ClauseId) {
-        watchers.add_watch(
-            self.frontier[0],
-            Watcher {
-                clause: clause_id,
-            },
-        );
+        watchers.add_watch(self.frontier[0], Watcher { clause: clause_id });
         if self.frontier.len() > 1 {
-            watchers.add_watch(
-                self.frontier[1],
-                Watcher {
-                    clause: clause_id,
-                },
-            );
+            watchers.add_watch(self.frontier[1], Watcher { clause: clause_id });
         }
     }
 }
