@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use solatic::{to_lits, SolveResult, Solver, Lit};
+use solatic::{to_lits, Lit, SolveResult, Solver};
 
 #[test]
 fn smoke_test() -> anyhow::Result<()> {
@@ -27,9 +27,15 @@ fn nontrivial_sat() -> anyhow::Result<()> {
 
     // first we create mutual implication v1 -> !v2 -> v3 -> v1
     // Remember the rule (a->b) is equivalent to (!a || b)
-    solver.add_clause(&[Lit::new(1, true), Lit::new(2, true)]).ok_or_else(unexpected)?; // v1 -> !v2
-    solver.add_clause(&[Lit::new(2, false), Lit::new(3, false)]).ok_or_else(unexpected)?; // !v2 -> v3
-    solver.add_clause(&[Lit::new(3, true), Lit::new(1, false)]).ok_or_else(unexpected)?; // v3 -> v1
+    solver
+        .add_clause(&[Lit::new(1, true), Lit::new(2, true)])
+        .ok_or_else(unexpected)?; // v1 -> !v2
+    solver
+        .add_clause(&[Lit::new(2, false), Lit::new(3, false)])
+        .ok_or_else(unexpected)?; // !v2 -> v3
+    solver
+        .add_clause(&[Lit::new(3, true), Lit::new(1, false)])
+        .ok_or_else(unexpected)?; // v3 -> v1
 
     // now make it impossible to assign !v1, v2, !v3, leaving only v1, !v2, v3 as a solution
     solver.add_clause(&to_lits(&[1, -2, 3])).ok_or_else(unexpected)?;
