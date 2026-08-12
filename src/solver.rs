@@ -1,6 +1,6 @@
 use bitflags::bitflags;
-use std::{fmt, io};
 use std::ops::{Index, IndexMut};
+use std::{fmt, io};
 #[derive(Clone, Copy, PartialEq, Eq)]
 
 // A variableID with the MSB indicates the sign of the literal (0=positive, 1=negative).
