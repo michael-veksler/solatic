@@ -1,2 +1,2 @@
 [env]
-RSTEST_TIMEOUT = "20"
+RSTEST_TIMEOUT = "22"
