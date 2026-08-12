@@ -1,8 +1,51 @@
 use bitflags::bitflags;
-use std::io;
 use std::ops::{Index, IndexMut};
+use std::{fmt, io};
+#[derive(Clone, Copy, PartialEq, Eq)]
 
-pub type Lit = i32;
+// A variableID with the MSB indicates the sign of the literal (0=positive, 1=negative).
+pub struct Lit(u32);
+
+impl Lit {
+    const SIGN_POS: usize = size_of::<Lit>() * 8 - 1;
+    const SIGN_MASK: u32 = 1 << Lit::SIGN_POS;
+    const VAR_MASK: u32 = !Lit::SIGN_MASK;
+    const VAR_MAX: u32 = Lit::VAR_MASK;
+    pub const fn new(var: usize, is_neg: bool) -> Self {
+        const {
+            assert!((MAX_VAR >> 31) == 0, "The assert below assumes we allow 31 bits");
+        }
+        assert!(var <= MAX_VAR, "Variable value must fit 31 bits");
+        if is_neg {
+            Lit((var as u32) | Lit::SIGN_MASK)
+        } else {
+            Lit(var as u32)
+        }
+    }
+    fn is_pos(self) -> bool {
+        (self.0 & Lit::SIGN_MASK) == 0
+    }
+    fn var(self) -> usize {
+        (self.0 & Lit::VAR_MASK) as usize
+    }
+}
+
+pub const MAX_VAR: usize = Lit::VAR_MAX as usize;
+
+impl std::ops::Neg for Lit {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Lit(self.0 ^ Lit::SIGN_MASK)
+    }
+}
+
+impl fmt::Debug for Lit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sign = if self.is_pos() { "" } else { "-" };
+        write!(f, "Lit({sign}{})", self.var())
+    }
+}
+
 pub type ClauseId = u32;
 const NULL_CLAUSE: ClauseId = ClauseId::MAX;
 
@@ -49,12 +92,14 @@ impl ClauseDb {
         let clause_id = self.offsets.len() as ClauseId;
         let clause_start = self.pool.len();
         self.offsets.push(clause_start);
-        let stored_size: Lit = lits.len().try_into().expect("clause too long");
+
+        // This is not logically a Lit, that's why we don't use its new() method.
+        let stored_size = Lit(lits.len().try_into().expect("clause too long"));
         self.pool.push(stored_size);
         let literal_start = self.pool.len();
         let mut is_tautology = false;
         for &lit in lits {
-            let var = var_of(lit).expect("invalid literal");
+            let var = lit.var();
             let next_seen: Assignment = lit.into();
             if variables.get_seen(var) == next_seen {
                 continue; // a simple duplicate - to ignore
@@ -67,16 +112,17 @@ impl ClauseDb {
             self.pool.push(lit);
         }
         for i in literal_start..self.pool.len() {
-            let lit = self.pool[i];
-            let var = var_of(lit).expect("invalid literal");
-            variables.reset_seen(var);
+            variables.reset_seen(self.pool[i].var());
         }
         if is_tautology {
             self.offsets.pop();
             self.pool.truncate(clause_start);
             NULL_CLAUSE
         } else {
-            self.pool[clause_start] = (self.pool.len() - literal_start) as Lit;
+            // This is not logically a Lit, that's why we don't use its new() method.
+            self.pool[clause_start] = Lit((self.pool.len() - literal_start)
+                .try_into()
+                .expect("clause too long to store in ClauseDb"));
             clause_id
         }
     }
@@ -89,7 +135,9 @@ impl ClauseDb {
 
     pub fn get(&self, id: ClauseId) -> ClauseAccessor {
         let header_pos = self.offsets[id as usize];
-        let size = self.pool[header_pos] as usize;
+
+        // This is not logically a Lit, that's why we access the underlying data directly
+        let size = self.pool[header_pos].0 as usize;
         let begin = header_pos + 1;
         ClauseAccessor {
             begin,
@@ -160,10 +208,10 @@ impl From<bool> for Assignment {
 }
 impl From<Lit> for Assignment {
     fn from(lit: Lit) -> Assignment {
-        match lit {
-            0 => Assignment::empty(),
-            _ if lit > 0 => Assignment::POSITIVE,
-            _ => Assignment::NEGATIVE,
+        if lit.is_pos() {
+            Assignment::POSITIVE
+        } else {
+            Assignment::NEGATIVE
         }
     }
 }
@@ -192,29 +240,27 @@ pub struct WatchersDb {
 #[allow(dead_code)]
 impl WatchersDb {
     pub fn add_watch(&mut self, lit: Lit, watch: Watcher) {
-        let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) {
+        let watchers = if lit.is_pos() {
             &mut self.pos_watchers
         } else {
             &mut self.neg_watchers
         };
-        if var >= watchers.len() {
-            watchers.resize(var + 1, Vec::new());
+        if lit.var() >= watchers.len() {
+            watchers.resize(lit.var() + 1, Vec::new());
         }
-        watchers[var].push(watch);
+        watchers[lit.var()].push(watch);
     }
 }
 
 impl Index<Lit> for WatchersDb {
     type Output = Vec<Watcher>;
     fn index(&self, lit: Lit) -> &Self::Output {
-        let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) {
+        let watchers = if lit.is_pos() {
             &self.pos_watchers
         } else {
             &self.neg_watchers
         };
-        if let Some(watches) = watchers.get(var) {
+        if let Some(watches) = watchers.get(lit.var()) {
             watches
         } else {
             static EMPTY_WATCH: Vec<Watcher> = Vec::new();
@@ -225,31 +271,16 @@ impl Index<Lit> for WatchersDb {
 
 impl IndexMut<Lit> for WatchersDb {
     fn index_mut(&mut self, lit: Lit) -> &mut Self::Output {
-        let var = var_of(lit).expect("invalid literal");
-        let watchers = if is_pos(lit) {
+        let watchers = if lit.is_pos() {
             &mut self.pos_watchers
         } else {
             &mut self.neg_watchers
         };
-        if var >= watchers.len() {
-            watchers.resize(var + 1, Vec::new());
+        if lit.var() >= watchers.len() {
+            watchers.resize(lit.var() + 1, Vec::new());
         }
-        &mut watchers[var]
+        &mut watchers[lit.var()]
     }
-}
-
-/// Return the variable id for a literal.
-fn var_of(lit: Lit) -> Option<usize> {
-    if lit == 0 {
-        None
-    } else {
-        Some(lit.unsigned_abs() as usize)
-    }
-}
-
-/// Return true when a literal is positive.
-fn is_pos(lit: Lit) -> bool {
-    lit > 0
 }
 
 #[derive(Default)]
@@ -269,43 +300,35 @@ impl ConflictInfo {
         self.latest_non_uip = 0;
         self.num_lit_in_level = 0;
         for &lit in conflict_literals {
-            if let Some(var) = var_of(lit) {
-                variables.set_seen(var, Assignment::from(lit));
-                let lit_level = variables.history[var].level;
-                debug_assert!(
-                    lit_level <= decision_level,
-                    "conflict literal {lit} has level {lit_level} but current level is {decision_level}"
-                );
-                if lit_level == self.decision_level {
-                    self.num_lit_in_level += 1;
-                } else {
-                    if self.latest_non_uip_level < lit_level {
-                        self.latest_non_uip_level = lit_level;
-                        self.latest_non_uip = self.frontier.len();
-                    }
-                    self.frontier.push(lit);
+            variables.set_seen(lit.var(), Assignment::from(lit));
+            let lit_level = variables.history[lit.var()].level;
+            debug_assert!(
+                lit_level <= decision_level,
+                "conflict literal {lit:?} has level {lit_level} but current level is {decision_level}"
+            );
+            if lit_level == self.decision_level {
+                self.num_lit_in_level += 1;
+            } else {
+                if self.latest_non_uip_level < lit_level {
+                    self.latest_non_uip_level = lit_level;
+                    self.latest_non_uip = self.frontier.len();
                 }
+                self.frontier.push(lit);
             }
         }
     }
     pub fn resolve(&mut self, variables: &mut VariableDb, literals: &[Lit], pivot: Lit) {
         for &clause_lit in literals {
-            let var;
-            if let Some(lit_var) = var_of(clause_lit) {
-                var = lit_var;
-            } else {
-                continue;
-            }
             if clause_lit == pivot {
                 self.num_lit_in_level -= 1;
-                variables.reset_seen(var);
+                variables.reset_seen(clause_lit.var());
                 continue;
             }
-            if !variables.get_seen(var).is_empty() {
+            if !variables.get_seen(clause_lit.var()).is_empty() {
                 continue;
             }
-            variables.set_seen(var, Assignment::from(clause_lit));
-            let clause_lit_level = variables.history[var].level;
+            variables.set_seen(clause_lit.var(), Assignment::from(clause_lit));
+            let clause_lit_level = variables.history[clause_lit.var()].level;
             if clause_lit_level == self.decision_level {
                 self.num_lit_in_level += 1;
                 continue;
@@ -314,20 +337,17 @@ impl ConflictInfo {
                 self.latest_non_uip = self.frontier.len();
                 self.latest_non_uip_level = clause_lit_level;
             }
-            variables.set_seen(var, Assignment::from(clause_lit));
+            variables.set_seen(clause_lit.var(), Assignment::from(clause_lit));
             self.frontier.push(clause_lit);
         }
     }
     pub fn find_trail_index_before(&self, variables: &mut VariableDb, trail: &[Lit], trail_index: usize) -> usize {
         // find 1-UIP
         for trail_index in (0..=trail_index).rev() {
-            let trail_lit = trail[trail_index];
-            let trail_var = var_of(trail_lit).unwrap();
+            let trail_var = trail[trail_index].var();
             debug_assert!(variables.history[trail_var].level == self.decision_level);
-            if let Some(var) = var_of(trail_lit) {
-                if !variables.get_seen(var).is_empty() {
-                    return trail_index;
-                }
+            if !variables.get_seen(trail_var).is_empty() {
+                return trail_index;
             }
         }
         0
@@ -397,9 +417,7 @@ impl VariableDb {
     }
     fn reset_seen_literals(&mut self, literals: &[Lit]) {
         for &lit in literals {
-            if let Some(var) = var_of(lit) {
-                self.reset_seen(var);
-            }
+            self.reset_seen(lit.var());
         }
     }
 }
@@ -447,7 +465,7 @@ impl Solver {
         if lits.is_empty() {
             return None;
         }
-        let opt_max_var: Option<usize> = lits.iter().map(|&lit| var_of(lit).unwrap_or(0)).max();
+        let opt_max_var: Option<usize> = lits.iter().map(|&lit| lit.var()).max();
         if let Some(max_var) = opt_max_var {
             self.variables.ensure_vars(max_var);
         }
@@ -467,9 +485,8 @@ impl Solver {
     }
 
     fn literal_state(&self, lit: Lit) -> Assignment {
-        let var = var_of(lit).expect("invalid 0 literal");
-        let assignment = self.variables.get_value(var);
-        if is_pos(lit) {
+        let assignment = self.variables.get_value(lit.var());
+        if lit.is_pos() {
             assignment
         } else {
             assignment.negated()
@@ -527,10 +544,8 @@ impl Solver {
     }
 
     fn set_literal(&mut self, lit: Lit, reason: Reason) {
-        let var = var_of(lit).expect("invalid literal");
-
-        self.variables.set_value(var, Assignment::from(is_pos(lit)));
-        self.variables.history[var] = AssignmentHistory {
+        self.variables.set_value(lit.var(), Assignment::from(lit.is_pos()));
+        self.variables.history[lit.var()] = AssignmentHistory {
             reason,
             level: self.trail_lim.len() as u32,
         };
@@ -600,7 +615,9 @@ impl Solver {
 
     #[must_use]
     fn make_decision(&mut self) -> Option<()> {
-        let choice = -self.find_first_unassigned_var(1).map(|unassigned| unassigned as Lit)?;
+        let choice = -self
+            .find_first_unassigned_var(1)
+            .map(|unassigned| Lit::new(unassigned, false))?;
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
         Some(())
@@ -611,8 +628,7 @@ impl Solver {
         self.trail_lim.truncate(level);
         while target_trail < self.trail.len() {
             let assigned_lit = self.trail.pop().unwrap();
-            let assigned_var = var_of(assigned_lit).expect("invalid literal");
-            self.variables.set_value(assigned_var, Assignment::UNASSIGNED);
+            self.variables.set_value(assigned_lit.var(), Assignment::UNASSIGNED);
         }
     }
 
@@ -626,7 +642,7 @@ impl Solver {
             );
             trail_index -= 1;
             let trail_lit = self.trail[trail_index];
-            let trail_var = var_of(trail_lit).unwrap();
+            let trail_var = trail_lit.var();
             if self.variables.get_seen(trail_var).is_empty() {
                 continue;
             }
@@ -749,6 +765,14 @@ impl Solver {
     }
 }
 
+#[allow(dead_code)]
+pub fn to_lits(signed_values: &[i32]) -> Vec<Lit> {
+    signed_values
+        .iter()
+        .map(|i| Lit::new(i.unsigned_abs() as usize, i.is_negative()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,13 +780,13 @@ mod tests {
     #[test]
     fn test_clause_db() {
         let mut db = ClauseDb::default();
-        let cl0 = [1, 2, 3, 4];
-        let cl0_tautology = [1, 2, 3, -2, 5, 7];
-        let cl2 = [-1, -2, -3];
-        let cl3 = [1, 2, 1, 2, 3, -4, 5, -4];
-        let cl3_compact = [1, 2, 3, -4, 5];
-        let cl4 = [];
-        let cl5 = [-5];
+        let cl0 = to_lits(&[1, 2, 3, 4]);
+        let cl0_tautology = to_lits(&[1, 2, 3, -2, 5, 7]);
+        let cl2 = to_lits(&[-1, -2, -3]);
+        let cl3 = to_lits(&[1, 2, 1, 2, 3, -4, 5, -4]);
+        let cl3_compact = to_lits(&[1, 2, 3, -4, 5]);
+        let cl4 = to_lits(&[]);
+        let cl5 = to_lits(&[-5]);
         let mut variables = VariableDb::default();
         variables.ensure_vars(9);
         let clause_id0 = db.push(cl0.as_slice(), &mut variables);
@@ -783,32 +807,32 @@ mod tests {
         assert_eq!(db.literals(db.get(clause_id4)), &cl4);
         assert_eq!(db.literals(db.get(clause_id5)), &cl5);
 
-        let c6 = [5, 6];
+        let c6 = to_lits(&[5, 6]);
         let clause_id6 = db.push(c6.as_slice(), &mut variables);
         assert_eq!(db.literals(db.get(clause_id6)), &c6);
         assert!(db.literals(db.get(clause_id4)).is_empty());
         assert!(!db.literals(db.get(clause_id0)).is_empty());
 
-        db.literals_mut(db.get(clause_id6))[0] = 8;
-        assert_eq!(db.literals(db.get(clause_id6)), &[8, 6]);
+        db.literals_mut(db.get(clause_id6))[0] = Lit::new(8, false);
+        assert_eq!(db.literals(db.get(clause_id6)), &to_lits(&[8, 6]));
     }
 
     #[test]
     fn test_watch_db() {
         let mut db = WatchersDb::default();
-        assert!(db[1].is_empty());
-        assert!(db[-1].is_empty());
+        assert!(db[Lit::new(1, false)].is_empty());
+        assert!(db[-Lit::new(1, false)].is_empty());
 
-        db.add_watch(1, Watcher { clause: 0 });
-        db.add_watch(-1, Watcher { clause: 1 });
-        db.add_watch(1, Watcher { clause: 2 });
+        db.add_watch(Lit::new(1, false), Watcher { clause: 0 });
+        db.add_watch(-Lit::new(1, false), Watcher { clause: 1 });
+        db.add_watch(Lit::new(1, false), Watcher { clause: 2 });
 
-        assert_eq!(db[1], &[Watcher { clause: 0 }, Watcher { clause: 2 }]);
-        assert_eq!(db[-1], &[Watcher { clause: 1 }]);
+        assert_eq!(db[Lit::new(1, false)], &[Watcher { clause: 0 }, Watcher { clause: 2 }]);
+        assert_eq!(db[-Lit::new(1, false)], &[Watcher { clause: 1 }]);
 
-        db[1].push(Watcher { clause: 3 });
+        db[Lit::new(1, false)].push(Watcher { clause: 3 });
         assert_eq!(
-            db[1],
+            db[Lit::new(1, false)],
             &[Watcher { clause: 0 }, Watcher { clause: 2 }, Watcher { clause: 3 }]
         );
     }

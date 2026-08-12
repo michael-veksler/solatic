@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::solver::{Lit, Solver};
+use crate::solver::{Lit, Solver, MAX_VAR};
 
 pub fn open(path: impl AsRef<Path>) -> Result<Solver> {
     let file = File::open(&path).with_context(|| format!("{}:", path.as_ref().display()))?;
@@ -33,18 +33,19 @@ fn parse_line(line: String) -> Result<Option<Vec<Lit>>> {
         return Ok(None); // skip comments and problem line
                          // we skip problem line because we don't need to know the number of variables or clauses in advance
     }
-    let mut clause: Vec<i32> = line
+    let clause: Vec<Lit> = line
         .split_whitespace()
-        .map(|s| s.parse::<Lit>().context("invalid literal "))
+        .take_while(|&s| s != "0")
+        .map(|s| {
+            s.parse::<i32>().context("invalid literal ").and_then(|i| {
+                if i.unsigned_abs() as usize > MAX_VAR {
+                    Err(anyhow!("Out of bounds"))
+                } else {
+                    Ok(Lit::new(i.unsigned_abs() as usize, i < 0))
+                }
+            })
+        })
         .collect::<Result<_>>()?;
 
-    match clause.pop() {
-        None => panic!("Got an empty clause"),
-        Some(last) => {
-            if last != 0 {
-                panic!("Last literal in DIMACS should be 0, not {}", last);
-            }
-        }
-    }
     Ok(Some(clause))
 }
