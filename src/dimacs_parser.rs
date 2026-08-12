@@ -11,7 +11,7 @@ pub fn open(path: impl AsRef<Path>) -> Result<Solver> {
 }
 
 pub fn from_reader(reader: impl BufRead) -> Result<Solver> {
-    let mut solver = Solver::new();
+    let mut solver = Solver::new(1);
 
     for (idx, line_maybe) in reader.lines().enumerate() {
         let line = line_maybe.with_context(|| format!("{}: ", idx + 1))?;
@@ -41,7 +41,7 @@ fn parse_line(line: String) -> Result<Option<Vec<Lit>>> {
                 if i.unsigned_abs() as usize > MAX_VAR {
                     Err(anyhow!("Out of bounds"))
                 } else {
-                    Ok(Lit::new(i.unsigned_abs() as usize, i < 0))
+                    Ok(Lit::new(i.unsigned_abs() as usize - 1, i < 0))
                 }
             })
         })
