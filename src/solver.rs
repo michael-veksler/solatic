@@ -429,11 +429,15 @@ pub struct Solver {
     trail_lim: Vec<usize>, // The trail-indices where decisions were made
     trail: Vec<Lit>,
     conflict_cache: ConflictInfo,
+    var_base_idx: usize,
 }
 
 impl Solver {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(var_base_idx: usize) -> Self {
+        Self {
+            var_base_idx,
+            ..Self::default()
+        }
     }
 
     #[must_use]
@@ -616,7 +620,7 @@ impl Solver {
     #[must_use]
     fn make_decision(&mut self) -> Option<()> {
         let choice = -self
-            .find_first_unassigned_var(1)
+            .find_first_unassigned_var(0)
             .map(|unassigned| Lit::new(unassigned, false))?;
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
@@ -735,8 +739,8 @@ impl Solver {
         }
     }
     pub fn write_assignments(&self, writer: &mut impl io::Write) -> Result<(), io::Error> {
-        for var in 1..self.values_len() {
-            write!(writer, "V{var}=")?;
+        for var in 0..self.values_len() {
+            write!(writer, "V{}=", var + self.var_base_idx)?;
             match self.value_of(var) {
                 None => writeln!(writer, "unset")?,
                 Some(val) => writeln!(writer, "{}", val as u32)?,
