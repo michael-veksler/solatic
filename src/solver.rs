@@ -7,26 +7,26 @@ use std::{fmt, io};
 pub struct Lit(u32);
 
 impl Lit {
-    const SIGN_POS: usize = size_of::<Lit>() * 8 - 1;
-    const SIGN_MASK: u32 = 1 << Lit::SIGN_POS;
+    const SIGN_MASK: u32 = 1;
     const VAR_MASK: u32 = !Lit::SIGN_MASK;
-    const VAR_MAX: u32 = Lit::VAR_MASK;
+    const VAR_MAX: u32 = Lit::VAR_MASK >> 1;
     pub const fn new(var: usize, is_neg: bool) -> Self {
         const {
             assert!((MAX_VAR >> 31) == 0, "The assert below assumes we allow 31 bits");
         }
         assert!(var <= MAX_VAR, "Variable value must fit 31 bits");
+        let shifted_var = (var as u32) << 1;
         if is_neg {
-            Lit((var as u32) | Lit::SIGN_MASK)
+            Lit(shifted_var | Lit::SIGN_MASK)
         } else {
-            Lit(var as u32)
+            Lit(shifted_var)
         }
     }
     fn is_pos(self) -> bool {
         (self.0 & Lit::SIGN_MASK) == 0
     }
     fn var(self) -> usize {
-        (self.0 & Lit::VAR_MASK) as usize
+        (self.0 >> 1) as usize
     }
 }
 
@@ -233,34 +233,23 @@ pub struct WatchersDb {
     // FIXME: Vec<Watch> is not cache friendly.
     //        Better have the size and capacity in the same memory block with the first Watch.
     //        Maybe use unsafe code to manage pointers, or use thin-vec  or thin-dst / erasable
-    pos_watchers: Vec<Vec<Watcher>>,
-    neg_watchers: Vec<Vec<Watcher>>,
+    watchers: Vec<Vec<Watcher>>,
 }
 
 #[allow(dead_code)]
 impl WatchersDb {
     pub fn add_watch(&mut self, lit: Lit, watch: Watcher) {
-        let watchers = if lit.is_pos() {
-            &mut self.pos_watchers
-        } else {
-            &mut self.neg_watchers
-        };
-        if lit.var() >= watchers.len() {
-            watchers.resize(lit.var() + 1, Vec::new());
+        if lit.0 as usize >= self.watchers.len() {
+            self.watchers.resize(lit.0 as usize + 1, Vec::new());
         }
-        watchers[lit.var()].push(watch);
+        self.watchers[lit.0 as usize].push(watch);
     }
 }
 
 impl Index<Lit> for WatchersDb {
     type Output = Vec<Watcher>;
     fn index(&self, lit: Lit) -> &Self::Output {
-        let watchers = if lit.is_pos() {
-            &self.pos_watchers
-        } else {
-            &self.neg_watchers
-        };
-        if let Some(watches) = watchers.get(lit.var()) {
+        if let Some(watches) = self.watchers.get(lit.0 as usize) {
             watches
         } else {
             static EMPTY_WATCH: Vec<Watcher> = Vec::new();
@@ -271,15 +260,10 @@ impl Index<Lit> for WatchersDb {
 
 impl IndexMut<Lit> for WatchersDb {
     fn index_mut(&mut self, lit: Lit) -> &mut Self::Output {
-        let watchers = if lit.is_pos() {
-            &mut self.pos_watchers
-        } else {
-            &mut self.neg_watchers
-        };
-        if lit.var() >= watchers.len() {
-            watchers.resize(lit.var() + 1, Vec::new());
+        if lit.0 as usize >= self.watchers.len() {
+            self.watchers.resize(lit.0 as usize + 1, Vec::new());
         }
-        &mut watchers[lit.var()]
+        &mut self.watchers[lit.0 as usize]
     }
 }
 
