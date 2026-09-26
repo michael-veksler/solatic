@@ -1,5 +1,5 @@
 use anyhow::Result;
-use solatic::index_list::{IndexList, Index};
+use solatic::index_list::{Index, IndexList};
 #[test]
 fn list_is_empty() {
     let list: IndexList<i32> = IndexList::new();
@@ -17,7 +17,7 @@ fn list_is_empty() {
 #[test]
 fn list_is_single() {
     let list: IndexList<i32> = {
-        let mut mut_list =IndexList::new();
+        let mut mut_list = IndexList::new();
         mut_list.push_front(&123);
         mut_list
     };
@@ -43,7 +43,6 @@ fn push_front() {
     list.push_front(&1);
     list.push_front(&2);
     list.push_front(&3);
-
 
     assert!(!list.is_empty());
     assert_eq!(list.len(), 3);
@@ -113,7 +112,6 @@ fn push_back_front() {
     assert_eq!(bwd_values(&list), &[2, 1, -1, -2]);
     assert_eq!(indices_to_values(&list, &push_back_indices), &[Some(1), Some(2)]);
     assert_eq!(indices_to_values(&list, &push_front_indices), &[Some(-1), Some(-2)]);
-
 }
 
 #[test]
