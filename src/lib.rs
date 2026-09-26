@@ -1,3 +1,4 @@
+pub mod index_list;
 pub mod dimacs_parser;
 pub mod solver;
 
