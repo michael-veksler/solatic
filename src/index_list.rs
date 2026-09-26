@@ -79,14 +79,14 @@ impl<T: Default + Clone> IndexList<T> {
     }
 
     pub fn get(&self, index: Index) -> Option<&T> {
-        if index.is_valid() {
+        if index.is_valid() && index.offset() < self.data.len() {
             Some(&self.data[index.offset()].value)
         } else {
             None
         }
     }
     pub fn get_mut(&mut self, index: Index) -> Option<&mut T> {
-        if index.is_valid() {
+        if index.is_valid() && index.offset() < self.data.len() {
             Some(&mut self.data[index.offset()].value)
         } else {
             None
@@ -117,7 +117,7 @@ impl<T: Default + Clone> IndexList<T> {
         &mut self.data.last_mut().unwrap().value
     }
     pub fn move_to_front(&mut self, index: Index) -> Result<()> {
-        if !index.is_valid() {
+        if !index.is_valid() || index.offset() >= self.data.len() {
             return Err(Error::msg("move_to_front: Invalid index"));
         }
         self.unlink(index);
@@ -125,10 +125,32 @@ impl<T: Default + Clone> IndexList<T> {
         self.link(CTRL_BLOCK_IDX, index);
         Ok(())
     }
+
+    /**
+     * Returns the next index after the given index in the list.
+     *
+     * If the given index is invalid or out of bounds, return the first valid index in the list
+     */
     pub fn next(&self, index: Index) -> Index {
+        let index = if index.offset() < self.data.len() {
+            index
+        } else {
+            CTRL_BLOCK_IDX
+        };
         self.data[index.offset()].next
     }
+
+    /**
+     * Returns the previous index before the given index in the list.
+     *
+     * If the given index is invalid or out of bounds, return the last valid index in the list
+     */
     pub fn prev(&self, index: Index) -> Index {
+        let index = if index.offset() < self.data.len() {
+            index
+        } else {
+            CTRL_BLOCK_IDX
+        };
         self.data[index.offset()].prev
     }
 }

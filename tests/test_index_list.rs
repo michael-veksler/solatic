@@ -180,3 +180,19 @@ fn move_to_front_invalid() -> Result<()> {
     assert_eq!(bwd_values(&list), &[1, 2]);
     Ok(())
 }
+
+#[test]
+fn prev_next_out_of_bounds() {
+    let mut list = IndexList::new();
+    list.push_back(&1);
+    list.push_back(&2);
+
+    let mut long_list = IndexList::new();
+    for i in 0..10 {
+        long_list.push_back(&i);
+    }
+
+    let out_of_bounds_index = long_list.back_index();
+    assert_eq!(list.next(out_of_bounds_index), list.front_index());
+    assert_eq!(list.prev(out_of_bounds_index), list.back_index());
+}
