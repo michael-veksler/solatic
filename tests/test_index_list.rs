@@ -87,38 +87,38 @@ fn push_back() {
     assert_eq!(bwd_values(&list), &[3, 2, 1]);
 }
 
-fn indices_to_values<T: Clone + Default>(list: &InplaceList<T>, indices: &[EntryHandle]) -> Vec<Option<T>> {
-    indices.iter().map(|&handle| list.get(handle).cloned()).collect()
+fn handles_to_values<T: Clone + Default>(list: &InplaceList<T>, handles: &[EntryHandle]) -> Vec<Option<T>> {
+    handles.iter().map(|&handle| list.get(handle).cloned()).collect()
 }
 #[test]
 fn push_back_front() {
     let mut list = InplaceList::new();
-    let mut push_back_indices: Vec<EntryHandle> = Vec::new();
-    let mut push_front_indices: Vec<EntryHandle> = Vec::new();
+    let mut push_back_handles: Vec<EntryHandle> = Vec::new();
+    let mut push_front_handles: Vec<EntryHandle> = Vec::new();
 
     list.push_back(&1);
-    push_back_indices.push(list.front_handle());
+    push_back_handles.push(list.front_handle());
 
     list.push_front(&-1);
-    push_front_indices.push(list.front_handle());
+    push_front_handles.push(list.front_handle());
 
     list.push_back(&2);
-    push_back_indices.push(list.back_handle());
+    push_back_handles.push(list.back_handle());
 
     list.push_front(&-2);
-    push_front_indices.push(list.front_handle());
+    push_front_handles.push(list.front_handle());
 
     assert_eq!(fwd_values(&list), &[-2, -1, 1, 2]);
     assert_eq!(bwd_values(&list), &[2, 1, -1, -2]);
-    assert_eq!(indices_to_values(&list, &push_back_indices), &[Some(1), Some(2)]);
-    assert_eq!(indices_to_values(&list, &push_front_indices), &[Some(-1), Some(-2)]);
+    assert_eq!(handles_to_values(&list, &push_back_handles), &[Some(1), Some(2)]);
+    assert_eq!(handles_to_values(&list, &push_front_handles), &[Some(-1), Some(-2)]);
 }
 
 #[test]
 fn test_invalid_handle() {
     let list: InplaceList<i32> = InplaceList::new();
 
-    assert_eq!(indices_to_values(&list, &[list.back_handle()]), &[None]);
+    assert_eq!(handles_to_values(&list, &[list.back_handle()]), &[None]);
 }
 #[test]
 fn move_to_front3() -> Result<()> {
