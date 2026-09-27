@@ -1,4 +1,5 @@
 use anyhow::{Error, Result};
+use std::ops::{Index, IndexMut};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntryHandle(u32);
@@ -152,5 +153,21 @@ impl<T: Default + Clone> InplaceList<T> {
             CTRL_BLOCK_HANDLE
         };
         self.data[handle.offset()].prev
+    }
+}
+
+impl<T> Index<usize> for InplaceList<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        // Delegate indexing to the underlying vector
+        &self.data[index + 1].value
+    }
+}
+
+// 2. Implement IndexMut for mutable access ( container[index] = value )
+impl<T> IndexMut<usize> for InplaceList<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index + 1].value
     }
 }

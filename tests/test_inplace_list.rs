@@ -196,3 +196,30 @@ fn prev_next_out_of_bounds() {
     assert_eq!(list.next(out_of_bounds_handle), list.front_handle());
     assert_eq!(list.prev(out_of_bounds_handle), list.back_handle());
 }
+
+#[test]
+fn index_and_index_mut() {
+    let mut list = InplaceList::new();
+    list.push_back(&1);
+    list.push_back(&2);
+    list.push_back(&3);
+    list.push_back(&-1);
+
+    assert_eq!(list[0], 1);
+    assert_eq!(list[1], 2);
+    assert_eq!(list[2], 3);
+    assert_eq!(list[3], -1);
+
+    list[0] = 10;
+    list[1] = 20;
+    list[2] = 30;
+    list[3] = -10;
+
+    assert_eq!(list[0], 10);
+    assert_eq!(list[1], 20);
+    assert_eq!(list[2], 30);
+    assert_eq!(list[3], -10);
+
+    assert_eq!(fwd_values(&list), &[10, 20, 30, -10]);
+    assert_eq!(bwd_values(&list), &[-10, 30, 20, 10]);
+}
