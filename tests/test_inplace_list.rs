@@ -1,5 +1,5 @@
 use anyhow::Result;
-use solatic::index_list::{EntryHandle, InplaceList};
+use solatic::inplace_list::{EntryHandle, InplaceList};
 #[test]
 fn list_is_empty() {
     let list: InplaceList<i32> = InplaceList::new();
