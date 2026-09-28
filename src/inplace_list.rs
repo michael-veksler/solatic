@@ -10,8 +10,18 @@ impl EntryHandle {
     pub fn is_valid(&self) -> bool {
         *self != CTRL_BLOCK_HANDLE
     }
-    fn offset(&self) -> usize {
+
+    // Implementation only offset vs the internal data vector index.
+    // For user visible indices use handle.index() instead.
+    fn impl_offset(&self) -> usize {
         self.0 as usize
+    }
+    pub fn index(&self) -> Option<usize> {
+        if self.is_valid() {
+            Some(self.0 as usize - 1)
+        } else {
+            None
+        }
     }
 }
 #[derive(Debug, Clone, Copy, Default)]
@@ -47,25 +57,25 @@ impl<T: Default + Clone> InplaceList<T> {
         (self.data.len() - 1) as u32
     }
     pub fn front_handle(&self) -> EntryHandle {
-        self.data[CTRL_BLOCK_HANDLE.offset()].next
+        self.data[CTRL_BLOCK_HANDLE.impl_offset()].next
     }
     pub fn back_handle(&self) -> EntryHandle {
-        self.data[CTRL_BLOCK_HANDLE.offset()].prev
+        self.data[CTRL_BLOCK_HANDLE.impl_offset()].prev
     }
     fn unlink(&mut self, handle: EntryHandle) {
-        let prev = self.data[handle.offset()].prev;
-        let next = self.data[handle.offset()].next;
-        self.data[prev.offset()].next = next;
-        self.data[next.offset()].prev = prev;
+        let prev = self.data[handle.impl_offset()].prev;
+        let next = self.data[handle.impl_offset()].next;
+        self.data[prev.impl_offset()].next = next;
+        self.data[next.impl_offset()].prev = prev;
     }
     fn link(&mut self, left: EntryHandle, right: EntryHandle) {
-        self.data[left.offset()].next = right;
-        self.data[right.offset()].prev = left;
+        self.data[left.impl_offset()].next = right;
+        self.data[right.impl_offset()].prev = left;
     }
     pub fn front(&self) -> Option<&T> {
         let head = self.front_handle();
         if head.is_valid() {
-            Some(&self.data[head.offset()].value)
+            Some(&self.data[head.impl_offset()].value)
         } else {
             None
         }
@@ -73,22 +83,22 @@ impl<T: Default + Clone> InplaceList<T> {
     pub fn front_mut(&mut self) -> Option<&mut T> {
         let head = self.front_handle();
         if head.is_valid() {
-            Some(&mut self.data[head.offset()].value)
+            Some(&mut self.data[head.impl_offset()].value)
         } else {
             None
         }
     }
 
     pub fn get(&self, handle: EntryHandle) -> Option<&T> {
-        if handle.is_valid() && handle.offset() < self.data.len() {
-            Some(&self.data[handle.offset()].value)
+        if handle.is_valid() && handle.impl_offset() < self.data.len() {
+            Some(&self.data[handle.impl_offset()].value)
         } else {
             None
         }
     }
     pub fn get_mut(&mut self, handle: EntryHandle) -> Option<&mut T> {
-        if handle.is_valid() && handle.offset() < self.data.len() {
-            Some(&mut self.data[handle.offset()].value)
+        if handle.is_valid() && handle.impl_offset() < self.data.len() {
+            Some(&mut self.data[handle.impl_offset()].value)
         } else {
             None
         }
@@ -101,8 +111,8 @@ impl<T: Default + Clone> InplaceList<T> {
             prev: CTRL_BLOCK_HANDLE,
             next: old_front,
         });
-        self.data[CTRL_BLOCK_HANDLE.offset()].next = new_front;
-        self.data[old_front.offset()].prev = new_front;
+        self.data[CTRL_BLOCK_HANDLE.impl_offset()].next = new_front;
+        self.data[old_front.impl_offset()].prev = new_front;
         &mut self.data.last_mut().unwrap().value
     }
     pub fn push_back(&mut self, value: &T) -> &mut T {
@@ -113,12 +123,12 @@ impl<T: Default + Clone> InplaceList<T> {
             prev: old_back,
             next: CTRL_BLOCK_HANDLE,
         });
-        self.data[CTRL_BLOCK_HANDLE.offset()].prev = new_back;
-        self.data[old_back.offset()].next = new_back;
+        self.data[CTRL_BLOCK_HANDLE.impl_offset()].prev = new_back;
+        self.data[old_back.impl_offset()].next = new_back;
         &mut self.data.last_mut().unwrap().value
     }
     pub fn move_to_front(&mut self, handle: EntryHandle) -> Result<()> {
-        if !handle.is_valid() || handle.offset() >= self.data.len() {
+        if !handle.is_valid() || handle.impl_offset() >= self.data.len() {
             return Err(Error::msg("move_to_front: Invalid handle"));
         }
         self.unlink(handle);
@@ -133,12 +143,12 @@ impl<T: Default + Clone> InplaceList<T> {
      * If the given handle is invalid or out of bounds, return the first valid handle in the list
      */
     pub fn next(&self, handle: EntryHandle) -> EntryHandle {
-        let handle = if handle.offset() < self.data.len() {
+        let handle = if handle.impl_offset() < self.data.len() {
             handle
         } else {
             CTRL_BLOCK_HANDLE
         };
-        self.data[handle.offset()].next
+        self.data[handle.impl_offset()].next
     }
 
     /**
@@ -147,12 +157,12 @@ impl<T: Default + Clone> InplaceList<T> {
      * If the given handle is invalid or out of bounds, return the last valid handle in the list
      */
     pub fn prev(&self, handle: EntryHandle) -> EntryHandle {
-        let handle = if handle.offset() < self.data.len() {
+        let handle = if handle.impl_offset() < self.data.len() {
             handle
         } else {
             CTRL_BLOCK_HANDLE
         };
-        self.data[handle.offset()].prev
+        self.data[handle.impl_offset()].prev
     }
 }
 
