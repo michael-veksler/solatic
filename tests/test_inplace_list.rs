@@ -57,13 +57,16 @@ fn push_front() {
     assert_eq!(values, &[3, 2, 1]);
 }
 
-fn fwd_values<T: Clone + Default>(list: &InplaceList<T>) -> Vec<T> {
+fn fwd_values<T: Clone + Default + Eq + std::fmt::Debug>(list: &InplaceList<T>) -> Vec<T> {
     let mut handle = list.front_handle();
     let mut values = Vec::new();
     while handle.is_valid() {
-        values.push(list.get(handle).unwrap().clone());
+        let value = list.get(handle).unwrap().clone();
+        assert_eq!(list[handle.index().unwrap()], value);
+        values.push(value);
         handle = list.next(handle);
     }
+    assert_eq!(handle.index(), None);
     values
 }
 fn bwd_values<T: Clone + Default>(list: &InplaceList<T>) -> Vec<T> {
