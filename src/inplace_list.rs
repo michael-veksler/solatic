@@ -47,9 +47,41 @@ impl<T: Default> Default for InplaceList<T> {
     }
 }
 impl<T: Default + Clone> InplaceList<T> {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self::default()
     }
+    pub fn new(elements: impl IntoIterator<Item = T>) -> Self {
+        let mut ret = Self::default();
+        let iter = elements.into_iter();
+        if let Some(size) = iter.size_hint().1 {
+            ret.data.reserve(size);
+        }
+        for element in iter {
+            ret.push_back(&element);
+        }
+        ret
+    }
+
+    /**
+     * Reorders the list according to the given indices.
+     * The indices should be in the range of the current list length.
+     *
+     * The parameter can be a collection of indices or an iterator returning indices,
+     * or anything else that can be converted into an iterator of indices.
+     */
+    pub fn relink_by_indices<U>(&mut self, indexes: impl IntoIterator<Item = U>)
+    where
+        U: Into<usize>,
+    {
+        let mut prev = CTRL_BLOCK_HANDLE;
+        for index in indexes.into_iter() {
+            let current = EntryHandle(index.into() as u32 + 1);
+            self.link(prev, current);
+            prev = current;
+        }
+        self.link(prev, CTRL_BLOCK_HANDLE);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.data.len() <= 1
     }

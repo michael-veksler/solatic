@@ -2,7 +2,7 @@ use anyhow::Result;
 use solatic::inplace_list::{EntryHandle, InplaceList};
 #[test]
 fn list_is_empty() {
-    let list: InplaceList<i32> = InplaceList::new();
+    let list: InplaceList<i32> = InplaceList::empty();
     assert!(list.is_empty());
     assert_eq!(list.len(), 0);
     assert!(!list.front_handle().is_valid());
@@ -17,7 +17,7 @@ fn list_is_empty() {
 #[test]
 fn list_is_single() {
     let list: InplaceList<i32> = {
-        let mut mut_list = InplaceList::new();
+        let mut mut_list = InplaceList::empty();
         mut_list.push_front(&123);
         mut_list
     };
@@ -39,7 +39,7 @@ fn list_is_single() {
 
 #[test]
 fn push_front() {
-    let mut list = InplaceList::new();
+    let mut list = InplaceList::empty();
     list.push_front(&1);
     list.push_front(&2);
     list.push_front(&3);
@@ -81,7 +81,7 @@ fn bwd_values<T: Clone + Default>(list: &InplaceList<T>) -> Vec<T> {
 
 #[test]
 fn push_back() {
-    let mut list = InplaceList::new();
+    let mut list = InplaceList::default(); // same as empty()
     list.push_back(&1);
     list.push_back(&2);
     list.push_back(&3);
@@ -95,7 +95,7 @@ fn handles_to_values<T: Clone + Default>(list: &InplaceList<T>, handles: &[Entry
 }
 #[test]
 fn push_back_front() {
-    let mut list = InplaceList::new();
+    let mut list = InplaceList::empty(); // same as default()
     let mut push_back_handles: Vec<EntryHandle> = Vec::new();
     let mut push_front_handles: Vec<EntryHandle> = Vec::new();
 
@@ -119,13 +119,13 @@ fn push_back_front() {
 
 #[test]
 fn test_invalid_handle() {
-    let list: InplaceList<i32> = InplaceList::new();
+    let list: InplaceList<i32> = InplaceList::empty();
 
     assert_eq!(handles_to_values(&list, &[list.back_handle()]), &[None]);
 }
 #[test]
 fn move_to_front3() -> Result<()> {
-    let mut list = InplaceList::new();
+    let mut list = InplaceList::empty();
     list.push_back(&1);
     list.push_back(&2);
     list.push_back(&3);
@@ -155,7 +155,7 @@ fn move_to_front3() -> Result<()> {
 
 #[test]
 fn move_to_front1() -> Result<()> {
-    let mut list = InplaceList::new();
+    let mut list = InplaceList::empty();
     list.push_back(&1);
 
     list.move_to_front(list.front_handle())?;
@@ -166,9 +166,7 @@ fn move_to_front1() -> Result<()> {
 
 #[test]
 fn move_to_front_invalid() -> Result<()> {
-    let mut list = InplaceList::new();
-    list.push_back(&1);
-    list.push_back(&2);
+    let mut list = InplaceList::new([1, 2]);
 
     let invalid_handle = list.next(list.back_handle());
     assert!(list.move_to_front(invalid_handle).is_err());
@@ -186,14 +184,8 @@ fn move_to_front_invalid() -> Result<()> {
 
 #[test]
 fn prev_next_out_of_bounds() {
-    let mut list = InplaceList::new();
-    list.push_back(&1);
-    list.push_back(&2);
-
-    let mut long_list = InplaceList::new();
-    for i in 0..10 {
-        long_list.push_back(&i);
-    }
+    let list = InplaceList::new([1, 2]);
+    let long_list = InplaceList::new(0..10);
 
     let out_of_bounds_handle = long_list.back_handle();
     assert_eq!(list.next(out_of_bounds_handle), list.front_handle());
@@ -202,11 +194,7 @@ fn prev_next_out_of_bounds() {
 
 #[test]
 fn index_and_index_mut() {
-    let mut list = InplaceList::new();
-    list.push_back(&1);
-    list.push_back(&2);
-    list.push_back(&3);
-    list.push_back(&-1);
+    let mut list = InplaceList::new([1, 2, 3, -1]);
 
     assert_eq!(list[0], 1);
     assert_eq!(list[1], 2);
@@ -225,4 +213,17 @@ fn index_and_index_mut() {
 
     assert_eq!(fwd_values(&list), &[10, 20, 30, -10]);
     assert_eq!(bwd_values(&list), &[-10, 30, 20, 10]);
+}
+
+#[test]
+fn relink_by_indices() {
+    let mut list = InplaceList::new([6, 10, 3, 1, 5, 7, 9, 2, 4, 8]);
+    let order_indices: [usize; 10] = [3, 7, 2, 8, 4, 0, 5, 9, 6, 1];
+    list.relink_by_indices(order_indices);
+    assert_eq!(fwd_values(&list), (1..=10).collect::<Vec<u32>>());
+    assert_eq!(bwd_values(&list), (1..=10).rev().collect::<Vec<u32>>());
+
+    list.relink_by_indices(order_indices.into_iter().rev());
+    assert_eq!(fwd_values(&list), (1..=10).rev().collect::<Vec<u32>>());
+    assert_eq!(bwd_values(&list), (1..=10).collect::<Vec<u32>>());
 }
