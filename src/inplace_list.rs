@@ -30,7 +30,7 @@ struct Node<T> {
     prev: EntryHandle,
     next: EntryHandle,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InplaceList<T> {
     data: Vec<Node<T>>,
 }
