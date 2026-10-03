@@ -55,23 +55,9 @@ impl<T: Default> InplaceList<T> {
     where
         T: Clone,
     {
-        assert!(new_len > self.len(), "new_len must be greater than current length");
-        let old_len = self.len();
-        self.data.resize(
-            new_len + 1,
-            Node {
-                value: element,
-                prev: CTRL_BLOCK_HANDLE,
-                next: CTRL_BLOCK_HANDLE,
-            },
-        );
-        let mut prev_back = self.back_handle();
-        for i in old_len..new_len {
-            let handle = EntryHandle(i as u32 + 1);
-            self.link(prev_back, handle);
-            prev_back = handle;
+        while self.len() < new_len {
+            self.push_back(element.clone());
         }
-        self.link(prev_back, CTRL_BLOCK_HANDLE);
     }
 
     /**
