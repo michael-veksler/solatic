@@ -30,7 +30,7 @@ struct Node<T> {
     prev: EntryHandle,
     next: EntryHandle,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InplaceList<T> {
     data: Vec<Node<T>>,
 }
@@ -242,7 +242,7 @@ impl<T: Default> InplaceList<T> {
     }
 }
 
-impl<T: Default + Clone + Copy> FromIterator<T> for InplaceList<T> {
+impl<T: Default> FromIterator<T> for InplaceList<T> {
     fn from_iter<I>(into_iter: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -257,7 +257,7 @@ impl<T: Default + Clone + Copy> FromIterator<T> for InplaceList<T> {
     }
 }
 
-impl<T: Default + Clone + Copy, const N: usize> From<[T; N]> for InplaceList<T> {
+impl<T: Default, const N: usize> From<[T; N]> for InplaceList<T> {
     fn from(array: [T; N]) -> Self {
         Self::from_iter(array)
     }
