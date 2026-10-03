@@ -2,7 +2,7 @@ use anyhow::Result;
 use solatic::inplace_list::{EntryHandle, InplaceList};
 #[test]
 fn list_is_empty() {
-    let list: InplaceList<i32> = InplaceList::empty();
+    let list: InplaceList<i32> = InplaceList::new();
     assert!(list.is_empty());
     assert_eq!(list.len(), 0);
     assert!(!list.front_handle().is_valid());
@@ -17,8 +17,8 @@ fn list_is_empty() {
 #[test]
 fn list_is_single() {
     let list: InplaceList<i32> = {
-        let mut mut_list = InplaceList::empty();
-        mut_list.push_front(&123);
+        let mut mut_list = InplaceList::new();
+        mut_list.push_front(123);
         mut_list
     };
     assert!(!list.is_empty());
@@ -39,10 +39,10 @@ fn list_is_single() {
 
 #[test]
 fn push_front() {
-    let mut list = InplaceList::empty();
-    list.push_front(&1);
-    list.push_front(&2);
-    list.push_front(&3);
+    let mut list = InplaceList::new();
+    list.push_front(1);
+    list.push_front(2);
+    list.push_front(3);
 
     assert!(!list.is_empty());
     assert_eq!(list.len(), 3);
@@ -82,9 +82,9 @@ fn bwd_values<T: Clone + Default>(list: &InplaceList<T>) -> Vec<T> {
 #[test]
 fn push_back() {
     let mut list = InplaceList::default(); // same as empty()
-    list.push_back(&1);
-    list.push_back(&2);
-    list.push_back(&3);
+    list.push_back(1);
+    list.push_back(2);
+    list.push_back(3);
 
     assert_eq!(fwd_values(&list), &[1, 2, 3]);
     assert_eq!(bwd_values(&list), &[3, 2, 1]);
@@ -95,20 +95,20 @@ fn handles_to_values<T: Clone + Default>(list: &InplaceList<T>, handles: &[Entry
 }
 #[test]
 fn push_back_front() {
-    let mut list = InplaceList::empty(); // same as default()
+    let mut list = InplaceList::new(); // same as default()
     let mut push_back_handles: Vec<EntryHandle> = Vec::new();
     let mut push_front_handles: Vec<EntryHandle> = Vec::new();
 
-    list.push_back(&1);
+    list.push_back(1);
     push_back_handles.push(list.front_handle());
 
-    list.push_front(&-1);
+    list.push_front(-1);
     push_front_handles.push(list.front_handle());
 
-    list.push_back(&2);
+    list.push_back(2);
     push_back_handles.push(list.back_handle());
 
-    list.push_front(&-2);
+    list.push_front(-2);
     push_front_handles.push(list.front_handle());
 
     assert_eq!(fwd_values(&list), &[-2, -1, 1, 2]);
@@ -119,16 +119,16 @@ fn push_back_front() {
 
 #[test]
 fn test_invalid_handle() {
-    let list: InplaceList<i32> = InplaceList::empty();
+    let list: InplaceList<i32> = InplaceList::new();
 
     assert_eq!(handles_to_values(&list, &[list.back_handle()]), &[None]);
 }
 #[test]
 fn move_to_front3() -> Result<()> {
-    let mut list = InplaceList::empty();
-    list.push_back(&1);
-    list.push_back(&2);
-    list.push_back(&3);
+    let mut list = InplaceList::new();
+    list.push_back(1);
+    list.push_back(2);
+    list.push_back(3);
 
     let second_handle = list.next(list.front_handle());
     assert_eq!(list.get(second_handle), Some(&2));
@@ -146,8 +146,8 @@ fn move_to_front3() -> Result<()> {
     assert_eq!(fwd_values(&list), &[3, 2, 1]);
     assert_eq!(bwd_values(&list), &[1, 2, 3]);
 
-    list.push_back(&0);
-    list.push_front(&4);
+    list.push_back(0);
+    list.push_front(4);
     assert_eq!(fwd_values(&list), &[4, 3, 2, 1, 0]);
     assert_eq!(bwd_values(&list), &[0, 1, 2, 3, 4]);
     Ok(())
@@ -155,8 +155,8 @@ fn move_to_front3() -> Result<()> {
 
 #[test]
 fn move_to_front1() -> Result<()> {
-    let mut list = InplaceList::empty();
-    list.push_back(&1);
+    let mut list = InplaceList::new();
+    list.push_back(1);
 
     list.move_to_front(list.front_handle())?;
     assert_eq!(fwd_values(&list), &[1]);
@@ -166,7 +166,7 @@ fn move_to_front1() -> Result<()> {
 
 #[test]
 fn move_to_front_invalid() -> Result<()> {
-    let mut list = InplaceList::new([1, 2]);
+    let mut list = InplaceList::from([1, 2]);
 
     let invalid_handle = list.next(list.back_handle());
     assert!(list.move_to_front(invalid_handle).is_err());
@@ -184,8 +184,8 @@ fn move_to_front_invalid() -> Result<()> {
 
 #[test]
 fn prev_next_out_of_bounds() {
-    let list = InplaceList::new([1, 2]);
-    let long_list = InplaceList::new(0..10);
+    let list = InplaceList::from([1, 2]);
+    let long_list = InplaceList::from_iter(0..10);
 
     let out_of_bounds_handle = long_list.back_handle();
     assert_eq!(list.next(out_of_bounds_handle), list.front_handle());
@@ -194,7 +194,7 @@ fn prev_next_out_of_bounds() {
 
 #[test]
 fn index_and_index_mut() {
-    let mut list = InplaceList::new([1, 2, 3, -1]);
+    let mut list = InplaceList::from([1, 2, 3, -1]);
 
     assert_eq!(list[0], 1);
     assert_eq!(list[1], 2);
@@ -217,7 +217,7 @@ fn index_and_index_mut() {
 
 #[test]
 fn relink_by_indices() {
-    let mut list = InplaceList::new([6, 10, 3, 1, 5, 7, 9, 2, 4, 8]);
+    let mut list = InplaceList::from([6, 10, 3, 1, 5, 7, 9, 2, 4, 8]);
     let order_indices: [usize; 10] = [3, 7, 2, 8, 4, 0, 5, 9, 6, 1];
     list.relink_by_indices(order_indices);
     assert_eq!(fwd_values(&list), (1..=10).collect::<Vec<u32>>());
@@ -226,4 +226,38 @@ fn relink_by_indices() {
     list.relink_by_indices(order_indices.into_iter().rev());
     assert_eq!(fwd_values(&list), (1..=10).rev().collect::<Vec<u32>>());
     assert_eq!(bwd_values(&list), (1..=10).collect::<Vec<u32>>());
+}
+
+#[test]
+fn resize() -> Result<()> {
+    let mut list: InplaceList<i32> = InplaceList::from_iter(0..4);
+    list.resize_indices(8, -1);
+
+    assert_eq!(fwd_values(&list), &[0, 1, 2, 3, -1, -1, -1, -1]);
+    assert_eq!(bwd_values(&list), &[-1, -1, -1, -1, 3, 2, 1, 0]);
+    for i in 4..8 {
+        list[i] = i as i32;
+    }
+    assert_eq!(fwd_values(&list), &[0, 1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(bwd_values(&list), &[7, 6, 5, 4, 3, 2, 1, 0]);
+    list.move_to_front(list.back_handle())?;
+    assert_eq!(fwd_values(&list), &[7, 0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(bwd_values(&list), &[6, 5, 4, 3, 2, 1, 0, 7]);
+    list.resize_indices(10, -2);
+    assert_eq!(fwd_values(&list), &[7, 0, 1, 2, 3, 4, 5, 6, -2, -2]);
+    assert_eq!(bwd_values(&list), &[-2, -2, 6, 5, 4, 3, 2, 1, 0, 7]);
+    for i in 8..10 {
+        list[i] = i as i32;
+    }
+    list.move_to_front(list.back_handle())?;
+    assert_eq!(fwd_values(&list), &[9, 7, 0, 1, 2, 3, 4, 5, 6, 8]);
+    assert_eq!(bwd_values(&list), &[8, 6, 5, 4, 3, 2, 1, 0, 7, 9]);
+
+    list.resize_indices(4, -1);
+    assert_eq!(fwd_values(&list), &[0, 1, 2, 3]); // Elements with index >= 4 have been removed
+    assert_eq!(bwd_values(&list), &[3, 2, 1, 0]); // Elements with index >= 4 have been removed
+    list.truncate_indices(2);
+    assert_eq!(fwd_values(&list), &[0, 1]); // Elements with index >= 2 have been removed
+    assert_eq!(bwd_values(&list), &[1, 0]); // Elements with index >= 2 have been removed
+    Ok(())
 }
