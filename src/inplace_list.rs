@@ -46,12 +46,15 @@ impl<T: Default> Default for InplaceList<T> {
         }
     }
 }
-impl<T: Default + Clone> InplaceList<T> {
+impl<T: Default> InplaceList<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn extend_with(&mut self, new_len: usize, element: T) {
+    fn extend_with(&mut self, new_len: usize, element: T)
+    where
+        T: Clone,
+    {
         assert!(new_len > self.len(), "new_len must be greater than current length");
         let old_len = self.len();
         self.data.resize(
@@ -76,6 +79,9 @@ impl<T: Default + Clone> InplaceList<T> {
      * Elements with indices greater than or equal to new_len are removed from the list.
      */
     pub fn truncate_indices(&mut self, new_len: usize) {
+        if new_len >= self.len() {
+            return;
+        }
         for i in new_len + 1..=self.len() {
             let handle = EntryHandle(i as u32);
             self.unlink(handle);
@@ -91,7 +97,10 @@ impl<T: Default + Clone> InplaceList<T> {
      * If the new length is less than the current length, the list is truncated.
      * The effect is as if elem[i] is dropped from the linked list for any i >= new_len.
      */
-    pub fn resize_indices(&mut self, new_len: usize, element: T) {
+    pub fn resize_indices(&mut self, new_len: usize, element: T)
+    where
+        T: Clone,
+    {
         if new_len > self.len() {
             self.extend_with(new_len, element);
         } else if new_len < self.len() {
@@ -240,9 +249,7 @@ impl<T: Default + Clone + Copy> FromIterator<T> for InplaceList<T> {
     {
         let iter = into_iter.into_iter();
         let mut ret: InplaceList<T> = Self::default();
-        if let Some(size) = iter.size_hint().1 {
-            ret.data.reserve(size);
-        }
+        ret.data.reserve(iter.size_hint().0);
         for element in iter {
             ret.push_back(element);
         }
