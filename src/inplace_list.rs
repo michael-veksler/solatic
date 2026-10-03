@@ -47,19 +47,56 @@ impl<T: Default> Default for InplaceList<T> {
     }
 }
 impl<T: Default + Clone> InplaceList<T> {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
-    pub fn new(elements: impl IntoIterator<Item = T>) -> Self {
-        let mut ret = Self::default();
-        let iter = elements.into_iter();
-        if let Some(size) = iter.size_hint().1 {
-            ret.data.reserve(size);
+
+    fn extend_with(&mut self, new_len: usize, element: T) {
+        assert!(new_len > self.len(), "new_len must be greater than current length");
+        let old_len = self.len();
+        self.data.resize(
+            new_len + 1,
+            Node {
+                value: element,
+                prev: CTRL_BLOCK_HANDLE,
+                next: CTRL_BLOCK_HANDLE,
+            },
+        );
+        let mut prev_back = self.back_handle();
+        for i in old_len..new_len {
+            let handle = EntryHandle(i as u32 + 1);
+            self.link(prev_back, handle);
+            prev_back = handle;
         }
-        for element in iter {
-            ret.push_back(&element);
+        self.link(prev_back, CTRL_BLOCK_HANDLE);
+    }
+
+    /**
+     * Truncates the list to the specified new length.
+     * Elements with indices greater than or equal to new_len are removed from the list.
+     */
+    pub fn truncate_indices(&mut self, new_len: usize) {
+        for i in new_len + 1..=self.len() {
+            let handle = EntryHandle(i as u32);
+            self.unlink(handle);
         }
-        ret
+        self.data.truncate(new_len + 1);
+    }
+
+    /**
+     * Resizes the list to the specified new length.
+     *
+     * If the new length is greater than the current length, the list is extended with the provided element.
+     *
+     * If the new length is less than the current length, the list is truncated.
+     * The effect is as if elem[i] is dropped from the linked list for any i >= new_len.
+     */
+    pub fn resize_indices(&mut self, new_len: usize, element: T) {
+        if new_len > self.len() {
+            self.extend_with(new_len, element);
+        } else if new_len < self.len() {
+            self.truncate_indices(new_len);
+        }
     }
 
     /**
@@ -85,8 +122,8 @@ impl<T: Default + Clone> InplaceList<T> {
     pub fn is_empty(&self) -> bool {
         self.data.len() <= 1
     }
-    pub fn len(&self) -> u32 {
-        (self.data.len() - 1) as u32
+    pub fn len(&self) -> usize {
+        self.data.len() - 1
     }
     pub fn front_handle(&self) -> EntryHandle {
         self.data[CTRL_BLOCK_HANDLE.impl_offset()].next
@@ -135,29 +172,27 @@ impl<T: Default + Clone> InplaceList<T> {
             None
         }
     }
-    pub fn push_front(&mut self, value: &T) -> &mut T {
+    pub fn push_front(&mut self, value: T) {
         let new_front = EntryHandle((self.data.len()) as u32);
         let old_front = self.front_handle();
         self.data.push(Node {
-            value: value.clone(),
+            value,
             prev: CTRL_BLOCK_HANDLE,
             next: old_front,
         });
         self.data[CTRL_BLOCK_HANDLE.impl_offset()].next = new_front;
         self.data[old_front.impl_offset()].prev = new_front;
-        &mut self.data.last_mut().unwrap().value
     }
-    pub fn push_back(&mut self, value: &T) -> &mut T {
+    pub fn push_back(&mut self, value: T) {
         let new_back = EntryHandle((self.data.len()) as u32);
         let old_back = self.back_handle();
         self.data.push(Node {
-            value: value.clone(),
+            value,
             prev: old_back,
             next: CTRL_BLOCK_HANDLE,
         });
         self.data[CTRL_BLOCK_HANDLE.impl_offset()].prev = new_back;
         self.data[old_back.impl_offset()].next = new_back;
-        &mut self.data.last_mut().unwrap().value
     }
     pub fn move_to_front(&mut self, handle: EntryHandle) -> Result<()> {
         if !handle.is_valid() || handle.impl_offset() >= self.data.len() {
@@ -195,6 +230,29 @@ impl<T: Default + Clone> InplaceList<T> {
             CTRL_BLOCK_HANDLE
         };
         self.data[handle.impl_offset()].prev
+    }
+}
+
+impl<T: Default + Clone + Copy> FromIterator<T> for InplaceList<T> {
+    fn from_iter<I>(into_iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let iter = into_iter.into_iter();
+        let mut ret: InplaceList<T> = Self::default();
+        if let Some(size) = iter.size_hint().1 {
+            ret.data.reserve(size);
+        }
+        for element in iter {
+            ret.push_back(element);
+        }
+        ret
+    }
+}
+
+impl<T: Default + Clone + Copy, const N: usize> From<[T; N]> for InplaceList<T> {
+    fn from(array: [T; N]) -> Self {
+        Self::from_iter(array)
     }
 }
 
