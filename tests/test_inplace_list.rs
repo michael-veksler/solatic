@@ -273,11 +273,11 @@ fn move_before() {
     assert_eq!(fwd_values(&list), &[0, 1, 3, 4, 5, 6, 7, 2]);
     assert_eq!(bwd_values(&list), &[2, 7, 6, 5, 4, 3, 1, 0]);
 
-    list.move_before(list.back_handle(),invalid);
+    list.move_before(list.back_handle(), invalid);
     assert_eq!(fwd_values(&list), &[0, 1, 3, 4, 5, 6, 7, 2]);
     assert_eq!(bwd_values(&list), &[2, 7, 6, 5, 4, 3, 1, 0]);
 
-    list.move_before(list.front_handle(),invalid);
+    list.move_before(list.front_handle(), invalid);
     assert_eq!(fwd_values(&list), &[1, 3, 4, 5, 6, 7, 2, 0]);
     assert_eq!(bwd_values(&list), &[0, 2, 7, 6, 5, 4, 3, 1]);
 
@@ -304,5 +304,4 @@ fn move_before() {
     list.move_before(list.get_handle(1), list.next(list.get_handle(1)));
     assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
     assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
-
 }
