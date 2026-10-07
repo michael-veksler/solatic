@@ -63,10 +63,12 @@ fn fwd_values<T: Clone + Default + Eq + std::fmt::Debug>(list: &InplaceList<T>) 
     while handle.is_valid() {
         let value = list.get(handle).unwrap().clone();
         assert_eq!(list[handle.index().unwrap()], value);
+        assert_eq!(list.get_handle(handle.index().unwrap()), handle);
         values.push(value);
         handle = list.next(handle);
     }
     assert_eq!(handle.index(), None);
+    assert_eq!(list.get_handle(list.len()), handle);
     values
 }
 fn bwd_values<T: Clone + Default>(list: &InplaceList<T>) -> Vec<T> {
@@ -260,4 +262,46 @@ fn resize() -> Result<()> {
     assert_eq!(fwd_values(&list), &[0, 1]); // Elements with index >= 2 have been removed
     assert_eq!(bwd_values(&list), &[1, 0]); // Elements with index >= 2 have been removed
     Ok(())
+}
+
+#[test]
+fn move_before() {
+    let mut list: InplaceList<i32> = InplaceList::from_iter(0..8);
+
+    let invalid = list.prev(list.front_handle());
+    list.move_before(list.get_handle(2), invalid);
+    assert_eq!(fwd_values(&list), &[0, 1, 3, 4, 5, 6, 7, 2]);
+    assert_eq!(bwd_values(&list), &[2, 7, 6, 5, 4, 3, 1, 0]);
+
+    list.move_before(list.back_handle(), invalid);
+    assert_eq!(fwd_values(&list), &[0, 1, 3, 4, 5, 6, 7, 2]);
+    assert_eq!(bwd_values(&list), &[2, 7, 6, 5, 4, 3, 1, 0]);
+
+    list.move_before(list.front_handle(), invalid);
+    assert_eq!(fwd_values(&list), &[1, 3, 4, 5, 6, 7, 2, 0]);
+    assert_eq!(bwd_values(&list), &[0, 2, 7, 6, 5, 4, 3, 1]);
+
+    list.move_before(list.get_handle(4), list.back_handle());
+    assert_eq!(fwd_values(&list), &[1, 3, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 3, 1]);
+
+    list.move_before(list.get_handle(3), list.front_handle());
+    assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
+
+    list.move_before(invalid, list.front_handle());
+    assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
+
+    list.move_before(invalid, invalid);
+    assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
+
+    list.move_before(list.get_handle(1), list.get_handle(1));
+    assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
+
+    list.move_before(list.get_handle(1), list.next(list.get_handle(1)));
+    assert_eq!(fwd_values(&list), &[3, 1, 5, 6, 7, 2, 4, 0]);
+    assert_eq!(bwd_values(&list), &[0, 4, 2, 7, 6, 5, 1, 3]);
 }

@@ -126,6 +126,12 @@ impl<T: Default> InplaceList<T> {
     pub fn back_handle(&self) -> EntryHandle {
         self.data[CTRL_BLOCK_HANDLE.impl_offset()].prev
     }
+    pub fn get_handle(&self, index: usize) -> EntryHandle {
+        if index >= self.len() {
+            return CTRL_BLOCK_HANDLE;
+        }
+        EntryHandle(index as u32 + 1)
+    }
     fn unlink(&mut self, handle: EntryHandle) {
         let prev = self.data[handle.impl_offset()].prev;
         let next = self.data[handle.impl_offset()].next;
@@ -197,6 +203,33 @@ impl<T: Default> InplaceList<T> {
         self.link(handle, self.front_handle());
         self.link(CTRL_BLOCK_HANDLE, handle);
         Ok(())
+    }
+
+    /**
+     * Move the moved_handle to be right before the anchor_handle.
+     *
+     * The relative order of the original neighbors of moved_handle is preserved.
+     * The relative order of the original neighbors of anchor_handle is preserved.
+     * The moved_handle will be positioned immediately before the anchor_handle.
+     *
+     * If anchor_handle is invalid, then the moved_handle will be moved to the back of the list.
+     * If moved_handle is invalid or is the anchor, then nothing is moved.
+     */
+    pub fn move_before(&mut self, moved_handle: EntryHandle, anchor_handle: EntryHandle) {
+        let anchor_handle = if anchor_handle.is_valid() && anchor_handle.impl_offset() < self.data.len() {
+            anchor_handle
+        } else {
+            CTRL_BLOCK_HANDLE
+        };
+        if !moved_handle.is_valid() || moved_handle.impl_offset() >= self.data.len() {
+            return;
+        }
+        if moved_handle == self.prev(anchor_handle) || moved_handle == anchor_handle {
+            return;
+        }
+        self.unlink(moved_handle);
+        self.link(self.prev(anchor_handle), moved_handle);
+        self.link(moved_handle, anchor_handle);
     }
 
     /**
