@@ -11,8 +11,8 @@ pub fn open(args: &SolverArgs, path: impl AsRef<Path>) -> Result<Solver> {
     from_reader(args, BufReader::new(file))
 }
 
-pub fn from_reader(&args: &SolverArgs, reader: impl BufRead) -> Result<Solver> {
-    let mut solver = Solver::new(&args, 1);
+pub fn from_reader(args: &SolverArgs, reader: impl BufRead) -> Result<Solver> {
+    let mut solver = Solver::new(args, 1);
 
     for (idx, line_maybe) in reader.lines().enumerate() {
         let line = line_maybe.with_context(|| format!("{}: ", idx + 1))?;

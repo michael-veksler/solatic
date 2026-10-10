@@ -26,11 +26,6 @@ fn config() -> &'static TestConfig {
     &CONFIG
 }
 
-#[fixture]
-fn literal_choice() -> LiteralChoice {
-    LiteralChoice::False
-}
-
 #[rstest]
 #[case::sat_3_vars("SAT-3-vars")]
 #[case::unsat_4_2_bit_all_diff("UNSAT-4-2-bit-all-diff")]
