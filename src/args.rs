@@ -10,7 +10,7 @@ pub enum LiteralChoice {
     True,
 }
 
-#[derive(Args, Debug, Clone, Copy, Default)]
+#[derive(Args, Debug, Clone, Copy, Default, PartialEq)]
 pub struct SolverArgs {
     /// Print the decisions, the backtracks, and the literal propagated after conflict.
     #[arg(short = 'v', long)]
