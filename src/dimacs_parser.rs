@@ -3,15 +3,16 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use crate::args::SolverArgs;
 use crate::solver::{Lit, Solver, MAX_VAR};
 
-pub fn open(path: impl AsRef<Path>) -> Result<Solver> {
+pub fn open(args: &SolverArgs, path: impl AsRef<Path>) -> Result<Solver> {
     let file = File::open(&path).with_context(|| format!("{}:", path.as_ref().display()))?;
-    from_reader(BufReader::new(file))
+    from_reader(args, BufReader::new(file))
 }
 
-pub fn from_reader(reader: impl BufRead) -> Result<Solver> {
-    let mut solver = Solver::new(1);
+pub fn from_reader(args: &SolverArgs, reader: impl BufRead) -> Result<Solver> {
+    let mut solver = Solver::new(args, 1);
 
     for (idx, line_maybe) in reader.lines().enumerate() {
         let line = line_maybe.with_context(|| format!("{}: ", idx + 1))?;
