@@ -621,9 +621,9 @@ impl Solver {
             LiteralChoice::True => Lit::new(unassigned, false),
         };
         let depth = self.trail_lim.len();
-        dprint!(self.args.verbose, "{depth}:{} ", self.lit_as_str(choice));
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
+        dprint!(self.args.verbose, "{depth}:{} ", self.lit_as_str(choice));
         Some(())
     }
 
