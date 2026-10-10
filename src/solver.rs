@@ -1,3 +1,6 @@
+use crate::args::{LiteralChoice, SolverArgs};
+use crate::dprint;
+use crate::dprintln;
 use bitflags::bitflags;
 use std::ops::{Index, IndexMut};
 use std::{fmt, io};
@@ -407,6 +410,7 @@ impl VariableDb {
 }
 #[derive(Default)]
 pub struct Solver {
+    args: SolverArgs,
     clauses: ClauseDb,
     watchers: WatchersDb,
     variables: VariableDb,
@@ -417,8 +421,9 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new(var_base_idx: usize) -> Self {
+    pub fn new(args: &SolverArgs, var_base_idx: usize) -> Self {
         Self {
+            args: *args,
             var_base_idx,
             ..Self::default()
         }
@@ -600,12 +605,23 @@ impl Solver {
     fn initial_propagate(&mut self) -> Option<()> {
         (0..self.clauses.len()).try_for_each(|clause_id| self.initial_propagate_clause(clause_id as ClauseId))
     }
+    fn lit_as_str(&self, lit: Lit) -> String {
+        if lit.is_pos() {
+            format!("V{}", lit.var() + self.var_base_idx)
+        } else {
+            format!("-V{}", lit.var() + self.var_base_idx)
+        }
+    }
 
     #[must_use]
     fn make_decision(&mut self) -> Option<()> {
-        let choice = -self
-            .find_first_unassigned_var(0)
-            .map(|unassigned| Lit::new(unassigned, false))?;
+        let unassigned = self.find_first_unassigned_var(0)?;
+        let choice = match self.args.choose_literal {
+            LiteralChoice::False => Lit::new(unassigned, true),
+            LiteralChoice::True => Lit::new(unassigned, false),
+        };
+        let depth = self.trail_lim.len();
+        dprint!(self.args.verbose, "{depth}:{} ", self.lit_as_str(choice));
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
         Some(())
@@ -678,6 +694,7 @@ impl Solver {
         let conflict_info = self.make_conflict_clause(conflicting_clause);
         if conflict_info.frontier.len() == 1 {
             let uip_lit = conflict_info.frontier[0];
+            dprintln!(self.args.verbose, "## BT 0:{} ", self.lit_as_str(uip_lit));
             self.backjump(0);
             self.set_literal(uip_lit, NULL_CLAUSE);
             return Some(());
@@ -686,6 +703,12 @@ impl Solver {
         conflict_info.add_watches(&mut self.watchers, conflict_clause_id);
 
         let latest_non_uip_lit = conflict_info.frontier[conflict_info.latest_non_uip];
+        dprintln!(
+            self.args.verbose,
+            "## BT -> {}:{}",
+            conflict_info.latest_non_uip_level,
+            self.lit_as_str(latest_non_uip_lit)
+        );
         self.backjump(conflict_info.latest_non_uip_level as usize);
         self.conflict_cache = conflict_info;
         if conflict_clause_id == NULL_CLAUSE {

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context};
 use rstest::{fixture, rstest};
 use solatic::dimacs_parser;
+use solatic::SolverArgs;
 use std::fs;
 use std::sync::LazyLock;
 
@@ -42,8 +43,8 @@ fn test_cnf(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> 
         println!("CNF {expected_result_path}:");
         println!("{input_cnf}");
     }
-    let mut solver =
-        dimacs_parser::from_reader(input_cnf.as_bytes()).with_context(|| format!("{test_path}: in dimacs parser:"))?;
+    let mut solver = dimacs_parser::from_reader(&SolverArgs::default(), input_cnf.as_bytes())
+        .with_context(|| format!("{test_path}: in dimacs parser:"))?;
     let mut result_buffer: Vec<u8> = Vec::new();
     solver.solve_and_write(&mut result_buffer)?;
     if config.is_verbose {
