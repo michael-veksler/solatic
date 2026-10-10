@@ -10,7 +10,6 @@ pub fn open(args: &SolverArgs, path: impl AsRef<Path>) -> Result<Solver> {
     let file = File::open(&path).with_context(|| format!("{}:", path.as_ref().display()))?;
     from_reader(args, BufReader::new(file))
 }
-
 pub fn from_reader(args: &SolverArgs, reader: impl BufRead) -> Result<Solver> {
     let mut solver = Solver::new(args, 1);
 
