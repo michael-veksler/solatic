@@ -40,7 +40,7 @@ pub struct SolverArgs {
 macro_rules! dprint {
     ($cond:expr, $($tokens: tt)*) => {
         if $cond {
-            print!($($tokens)*);
+            eprint!($($tokens)*);
         }
     };
 }
@@ -50,7 +50,7 @@ macro_rules! dprint {
 macro_rules! dprintln {
     ($cond:expr, $($tokens: tt)*) => {
         if $cond {
-            println!($($tokens)*);
+            eprintln!($($tokens)*);
         }
     };
 }

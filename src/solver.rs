@@ -707,7 +707,7 @@ impl Solver {
             self.args.verbose,
             "## BT -> {}:{}",
             conflict_info.latest_non_uip_level,
-            self.lit_as_str(latest_non_uip_lit)
+            self.lit_as_str(conflict_info.frontier[0])
         );
         self.backjump(conflict_info.latest_non_uip_level as usize);
         self.conflict_cache = conflict_info;
