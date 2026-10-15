@@ -63,13 +63,13 @@ macro_rules! __dprint_once_impl {
 #[macro_export]
 macro_rules! dprint_once {
     ($cond:expr, $($tokens: tt)*) => {
-        $crate::__dprint_once_impl!(eprint, $cond, $($tokens)*);
+        $crate::__dprint_once_impl!(eprint, $cond, $($tokens)*)
     }
 }
 
 #[macro_export]
 macro_rules! dprintln_once {
     ($cond:expr, $($tokens: tt)*) => {
-        $crate::__dprint_once_impl!(eprintln, $cond, $($tokens)*);
+        $crate::__dprint_once_impl!(eprintln, $cond, $($tokens)*)
     }
 }
