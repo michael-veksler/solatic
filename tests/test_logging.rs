@@ -21,8 +21,9 @@ fn dprint_dprintln_validate() {
 
     assert!(output.status.success(), "dprintln_output child failed");
     let output_str = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output_str.contains(indoc! {"
+    assert_eq!(
+        &output_str,
+        indoc! {"
                   0: named placeholder
                   0: inplace
                   0: unnamed placeholder
@@ -32,8 +33,7 @@ fn dprint_dprintln_validate() {
                   4: named placeholder
                   4: inplace
                   4: unnamed placeholder
-                  "}),
-        "Actual output: {output_str:?}"
+                  "}
     );
 }
 
@@ -56,12 +56,12 @@ fn dprint_dprintln_once_validate() {
 
     assert!(output.status.success(), "dprintln_output child failed");
     let output_str = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output_str.contains(indoc! {"
+    assert_eq!(
+        &output_str,
+        indoc! {"
                   0: named placeholder
                   0: inplace
                   0: unnamed placeholder
-                  "}),
-        "Actual output: {output_str:?}"
+                  "}
     );
 }

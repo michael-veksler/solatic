@@ -37,9 +37,8 @@ macro_rules! dprintln {
 macro_rules! __dprint_once_impl {
     ($printer:ident, $cond:expr, $($tokens: tt)*) => {
         if $cond {
-            use ::std::sync::atomic::{AtomicBool, Ordering};
-            static WAS_PRINTED: AtomicBool = AtomicBool::new(false);
-            if !WAS_PRINTED.swap(true, Ordering::Relaxed) {
+            static WAS_PRINTED: ::std::sync::atomic::AtomicBool = ::std::sync::atomic::AtomicBool::new(false);
+            if !WAS_PRINTED.swap(true, ::std::sync::atomic::Ordering::Relaxed) {
                 $printer!($($tokens)*);
             }
         }
