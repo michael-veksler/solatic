@@ -20,37 +20,3 @@ pub struct SolverArgs {
     #[arg(long, value_enum, default_value_t)]
     pub choose_literal: LiteralChoice,
 }
-
-/// Debug print macro that prints only if the condition is true.
-///
-/// # Arguments
-/// * `cond` - The condition to check before printing.
-/// * `tokens` - The tokens to print if the condition is true.
-///
-/// # Examples
-///
-/// ```rust
-/// use solatic::dprint;
-/// # fn main() {
-/// let condition = true;
-/// dprint!(condition, "This will print if condition is true: {}\n", 42);
-/// # }
-/// ```
-#[macro_export]
-macro_rules! dprint {
-    ($cond:expr, $($tokens: tt)*) => {
-        if $cond {
-            eprint!($($tokens)*);
-        }
-    };
-}
-
-/// like `dprint!` but adds a newline at the end.
-#[macro_export]
-macro_rules! dprintln {
-    ($cond:expr, $($tokens: tt)*) => {
-        if $cond {
-            eprintln!($($tokens)*);
-        }
-    };
-}
