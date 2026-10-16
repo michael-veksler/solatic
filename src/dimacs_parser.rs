@@ -48,14 +48,22 @@ impl DimacsBuilder {
                 continue;
             }
             let line = line.trim();
+            if line.starts_with('c') {
+                dprintln_once!(
+                    self.args.verbose,
+                    "{}: Comment line should not start with a whitespace {line:?}",
+                    self.lineno
+                );
+                continue;
+            }
             if line.is_empty() {
                 continue;
             }
-            if !line.starts_with('p') {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() || parts[0] != "p" {
                 return Err(anyhow!("{}: expected problem line", self.lineno));
             }
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() != 4 || parts[1] != "cnf" {
+            if parts.len() != 4 || parts[0] != "p" || parts[1] != "cnf" {
                 return Err(anyhow!("{}: invalid problem line", self.lineno));
             }
             let num_vars = parts[2]

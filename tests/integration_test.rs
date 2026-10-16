@@ -67,6 +67,7 @@ fn test_false_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Resul
 
 #[rstest]
 #[case::invalid_pre_header("invalid-pre-header")]
+#[case::invalid_header("invalid-header")]
 fn test_parse_failure_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
     run_cfg(
         config,
