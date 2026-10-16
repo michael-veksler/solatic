@@ -32,12 +32,19 @@ mod tests {
     use solatic::args::LiteralChoice;
 
     #[rstest]
-    #[case(vec!["solatic", "file.cnf"], Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: false, choose_literal: LiteralChoice::False }}))]
-    #[case(vec!["solatic", "--verbose", "file.cnf"], Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: true, choose_literal: LiteralChoice::False }}))]
+    #[case(vec!["solatic", "file.cnf"],
+           Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: false, choose_literal: LiteralChoice::Phase }}))]
+    #[case(vec!["solatic", "--verbose", "file.cnf"],
+           Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: true, choose_literal: LiteralChoice::Phase }}))]
     #[case(vec!["solatic", "--verbose", "--choose-literal", "true", "file.cnf"],
            Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: true, choose_literal: LiteralChoice::True }}))]
     #[case(vec!["solatic", "--choose-literal", "false", "file.cnf"],
            Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: false, choose_literal: LiteralChoice::False }}))]
+    #[case(vec!["solatic", "--choose-literal", "phase", "file.cnf"],
+           Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: false, choose_literal: LiteralChoice::Phase }}))]
+    #[case(vec!["solatic", "--choose-literal", "anti-phase", "file.cnf"],
+           Ok(DimacsArgs { file: PathBuf::from("file.cnf"), solver_args: SolverArgs{ verbose: false, choose_literal: LiteralChoice::AntiPhase }}))]
+    #[case(vec!["solatic", "--choose-literal", "antiphase", "file.cnf"], Err(anyhow!("bla")))] // Missing file
     #[case(vec!["solatic"], Err(anyhow!("bla")))] // Missing file
     fn test_cmdline_parsing(#[case] input: Vec<&str>, #[case] expected: Result<DimacsArgs>) {
         let result = DimacsArgs::try_parse_from(input);

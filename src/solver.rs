@@ -372,6 +372,7 @@ pub struct VariableDb {
     history: Vec<AssignmentHistory>,
     // Invariant: When not in clause construction, seen_in_clause[i] == Assignment::empty()
     seen_in_clause: Vec<Assignment>, // empty() = not seen
+    phases: Vec<bool>,               // true = positive, false = negative
 }
 
 impl VariableDb {
@@ -380,6 +381,7 @@ impl VariableDb {
             self.values.resize(var + 1, Assignment::POSITIVE | Assignment::NEGATIVE);
             self.history.resize(var + 1, AssignmentHistory { reason: 0, level: 0 });
             self.seen_in_clause.resize(var + 1, Assignment::empty());
+            self.phases.resize(var + 1, false);
         }
     }
 
@@ -388,6 +390,11 @@ impl VariableDb {
     }
     fn set_value(&mut self, i: usize, value: Assignment) {
         self.values[i] = value;
+        match value {
+            Assignment::POSITIVE => self.phases[i] = true,
+            Assignment::NEGATIVE => self.phases[i] = false,
+            _ => {}
+        }
     }
     fn len(&self) -> usize {
         debug_assert!(self.values.len() == self.history.len());
@@ -406,6 +413,9 @@ impl VariableDb {
         for &lit in literals {
             self.reset_seen(lit.var());
         }
+    }
+    fn get_phase(&self, var: usize) -> bool {
+        self.phases[var]
     }
 }
 #[derive(Default)]
@@ -616,14 +626,21 @@ impl Solver {
     #[must_use]
     fn make_decision(&mut self) -> Option<()> {
         let unassigned = self.find_first_unassigned_var(0)?;
-        let choice = match self.args.choose_literal {
-            LiteralChoice::False => Lit::new(unassigned, true),
-            LiteralChoice::True => Lit::new(unassigned, false),
+        let value = match self.args.choose_literal {
+            LiteralChoice::False => false,
+            LiteralChoice::True => true,
+            LiteralChoice::Phase => self.variables.get_phase(unassigned),
+            LiteralChoice::AntiPhase => !self.variables.get_phase(unassigned),
         };
-        let depth = self.trail_lim.len();
+        let choice = Lit::new(unassigned, !value);
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
-        dprint!(self.args.verbose, "{depth}:{} ", self.lit_as_str(choice));
+        dprint!(
+            self.args.verbose,
+            "{}:{} ",
+            self.trail_lim.len(),
+            self.lit_as_str(choice)
+        );
         Some(())
     }
 
