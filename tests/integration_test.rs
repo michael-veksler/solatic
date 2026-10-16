@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context};
 use rstest::{fixture, rstest};
 use solatic::dimacs_parser;
+use solatic::solver::Solver;
 use solatic::LiteralChoice;
 use solatic::SolverArgs;
-use solatic::solver::Solver;
 use std::fs;
 use std::sync::LazyLock;
 
@@ -41,7 +41,13 @@ fn config() -> &'static TestConfig {
 #[case::unsat_9_3_bit_all_diff("UNSAT-9-8-bit-all-diff-one-hot")]
 #[case::unsat_10_9_bit_all_diff("UNSAT-10-9-bit-all-diff-one-hot")]
 fn test_all_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
-    run_cfg(config, test_stem, test_stem, LiteralChoice::False, ExpectStatus::Success)?;
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::False,
+        ExpectStatus::Success,
+    )?;
     run_cfg(config, test_stem, test_stem, LiteralChoice::True, ExpectStatus::Success)
 }
 
@@ -50,13 +56,25 @@ fn test_all_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<
 #[case::sat_10_9_mostly_bit_all_diff("SAT-10-9-bit-mostly-all-diff-one-hot")]
 #[case::unsat_12_11_bit_all_one_hot("UNSAT-12-11-bit-all-diff-one-hot")]
 fn test_false_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
-    run_cfg(config, test_stem, test_stem, LiteralChoice::False, ExpectStatus::Success)
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::False,
+        ExpectStatus::Success,
+    )
 }
 
 #[rstest]
 #[case::invalid_pre_header("invalid-pre-header")]
 fn test_parse_failure_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
-    run_cfg(config, test_stem, test_stem, LiteralChoice::False, ExpectStatus::ParseFailure)
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::False,
+        ExpectStatus::ParseFailure,
+    )
 }
 
 #[rstest]
@@ -65,7 +83,13 @@ fn test_parse_failure_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyho
 // too slow: UNSAT-12-11-bit-all-diff-one-hot
 fn test_true_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
     let true_stem = format!("{test_stem}-true");
-    run_cfg(config, test_stem, &true_stem, LiteralChoice::True, ExpectStatus::Success)
+    run_cfg(
+        config,
+        test_stem,
+        &true_stem,
+        LiteralChoice::True,
+        ExpectStatus::Success,
+    )
 }
 
 fn run_cfg(
@@ -97,12 +121,10 @@ fn run_cfg(
             }
             Err(anyhow!("{}: expected parse failure", test_path))
         }
-        ExpectStatus::Success => {
-            match solver_maybe {
-                Err(err) => Err(anyhow!("{}: failed to parse DIMACS: {}", test_path, err)),
-                Ok(solver) => test_solver(config, test_stem, &expected_result_path, solver),
-            }
-        }
+        ExpectStatus::Success => match solver_maybe {
+            Err(err) => Err(anyhow!("{}: failed to parse DIMACS: {}", test_path, err)),
+            Ok(solver) => test_solver(config, test_stem, &expected_result_path, solver),
+        },
     }
 }
 
@@ -122,7 +144,6 @@ fn test_solver(
     expected_result_path: &str,
     mut solver: Solver,
 ) -> anyhow::Result<()> {
-
     let mut result_buffer: Vec<u8> = Vec::new();
     solver.solve_and_write(&mut result_buffer)?;
     if config.is_verbose {
