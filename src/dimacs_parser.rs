@@ -64,7 +64,10 @@ impl DimacsBuilder {
                 return Err(anyhow!("{}: expected problem line", self.lineno));
             }
             if parts.len() != 4 || parts[1] != "cnf" {
-                return Err(anyhow!("{}: invalid problem line, or unsupported problem type", self.lineno));
+                return Err(anyhow!(
+                    "{}: invalid problem line, or unsupported problem type",
+                    self.lineno
+                ));
             }
             let num_vars = parts[2]
                 .parse::<usize>()
