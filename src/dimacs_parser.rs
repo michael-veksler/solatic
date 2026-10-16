@@ -51,24 +51,25 @@ impl DimacsBuilder {
             if line.is_empty() {
                 continue;
             }
-            if line.starts_with('p') {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() != 4 || parts[1] != "cnf" {
-                    return Err(anyhow!("{}: invalid problem line", self.lineno));
-                }
-                let num_vars = parts[2]
-                    .parse::<usize>()
-                    .context("has invalid integer value for number of variables")?;
-                let num_clauses = parts[3]
-                    .parse::<usize>()
-                    .context("has invalid integer value for number of clauses")?;
-                self.problem_line = CnfProblemLine { num_vars, num_clauses };
-                self.actual_problem = CnfProblemLine {
-                    num_vars,
-                    num_clauses: 0,
-                };
-                return Ok(());
+            if !line.starts_with('p') {
+                return Err(anyhow!("{}: expected problem line", self.lineno));
             }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() != 4 || parts[1] != "cnf" {
+                return Err(anyhow!("{}: invalid problem line", self.lineno));
+            }
+            let num_vars = parts[2]
+                .parse::<usize>()
+                .context("has invalid integer value for number of variables")?;
+            let num_clauses = parts[3]
+                .parse::<usize>()
+                .context("has invalid integer value for number of clauses")?;
+            self.problem_line = CnfProblemLine { num_vars, num_clauses };
+            self.actual_problem = CnfProblemLine {
+                num_vars,
+                num_clauses: 0,
+            };
+            return Ok(());
         }
         Err(anyhow!("missing problem line"))
     }
@@ -135,7 +136,7 @@ impl DimacsBuilder {
             let num = token
                 .parse::<i32>()
                 .with_context(|| format!("{}: Expecting integer not {token:?}", self.lineno))?;
-            self.actual_problem.num_vars = self.actual_problem.num_vars.max(num.unsigned_abs() as usize + 1);
+            self.actual_problem.num_vars = self.actual_problem.num_vars.max(num.unsigned_abs() as usize);
 
             if num == 0 {
                 self.add_clause(solver)?;
