@@ -98,8 +98,8 @@ impl DimacsBuilder {
         self.read_problem_line(read_iter.by_ref())?;
 
         for line_maybe in &mut read_iter {
-            let line = line_maybe.with_context(|| format!("{}: ", self.lineno))?;
             self.lineno += 1;
+            let line = line_maybe.with_context(|| format!("{}: ", self.lineno))?;
             self.parse_line(&mut solver, &line)?;
         }
         if !self.lits.is_empty() {
