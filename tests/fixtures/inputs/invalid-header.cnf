@@ -1,0 +1,3 @@
+c Validate that stuff before the header triggers an error
+pineapple cnf 2 2
+-1 -2 0
