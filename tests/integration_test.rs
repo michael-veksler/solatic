@@ -41,10 +41,28 @@ fn config() -> &'static TestConfig {
 #[case::unsat_9_3_bit_all_diff("UNSAT-9-8-bit-all-diff-one-hot")]
 #[case::unsat_10_9_bit_all_diff("UNSAT-10-9-bit-all-diff-one-hot")]
 fn test_all_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
-    run_cfg(config, test_stem, test_stem, LiteralChoice::False, ExpectStatus::Success)?;
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::False,
+        ExpectStatus::Success,
+    )?;
     run_cfg(config, test_stem, test_stem, LiteralChoice::True, ExpectStatus::Success)?;
-    run_cfg(config, test_stem, test_stem, LiteralChoice::Phase, ExpectStatus::Success)?;
-    run_cfg(config, test_stem, test_stem, LiteralChoice::AntiPhase, ExpectStatus::Success)
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::Phase,
+        ExpectStatus::Success,
+    )?;
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::AntiPhase,
+        ExpectStatus::Success,
+    )
 }
 
 #[rstest]
@@ -95,7 +113,13 @@ fn test_true_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result
 #[case::sat_10_9_mostly_bit_all_diff("SAT-10-9-bit-mostly-all-diff-one-hot")]
 #[case::unsat_12_11_bit_all_one_hot("UNSAT-12-11-bit-all-diff-one-hot")]
 fn test_phase_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
-    run_cfg(config, test_stem, test_stem, LiteralChoice::Phase, ExpectStatus::Success)
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::Phase,
+        ExpectStatus::Success,
+    )
 }
 
 #[rstest]
@@ -103,7 +127,13 @@ fn test_phase_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Resul
 #[case::sat_10_9_mostly_bit_all_diff("SAT-10-9-bit-mostly-all-diff-one-hot")]
 fn test_anti_phase_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
     let anti_phase_stem = format!("{test_stem}-true");
-    run_cfg(config, test_stem, &anti_phase_stem, LiteralChoice::AntiPhase, ExpectStatus::Success)
+    run_cfg(
+        config,
+        test_stem,
+        &anti_phase_stem,
+        LiteralChoice::AntiPhase,
+        ExpectStatus::Success,
+    )
 }
 
 fn run_cfg(
