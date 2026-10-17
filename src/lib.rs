@@ -1,6 +1,7 @@
 pub mod args;
 pub mod dimacs_parser;
 pub mod inplace_list;
+pub mod logging;
 pub mod solver;
 
 pub use args::{LiteralChoice, SolverArgs};

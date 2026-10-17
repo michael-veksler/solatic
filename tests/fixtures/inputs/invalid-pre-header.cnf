@@ -1,0 +1,4 @@
+c Validate that stuff before the header triggers an error
+1 1 0
+p cnf 2 2
+-1 -2 0

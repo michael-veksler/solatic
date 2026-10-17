@@ -86,7 +86,7 @@ class CnfDb:
         """Print the CNF to stdout in DIMACS format"""
         for line in self._header_comments:
             print(f"c {line}")
-        print(f"p {self._num_vars} {self._num_clauses}")
+        print(f"p cnf {self._num_vars} {self._num_clauses}")
         print(self._out_stream.getvalue(), end='')
 
     def vars_to_str(self, bool_vars: list[int]) -> str:
