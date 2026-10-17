@@ -48,7 +48,21 @@ fn test_all_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<
         LiteralChoice::False,
         ExpectStatus::Success,
     )?;
-    run_cfg(config, test_stem, test_stem, LiteralChoice::True, ExpectStatus::Success)
+    run_cfg(config, test_stem, test_stem, LiteralChoice::True, ExpectStatus::Success)?;
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::Phase,
+        ExpectStatus::Success,
+    )?;
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::AntiPhase,
+        ExpectStatus::Success,
+    )
 }
 
 #[rstest]
@@ -90,6 +104,34 @@ fn test_true_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result
         test_stem,
         &true_stem,
         LiteralChoice::True,
+        ExpectStatus::Success,
+    )
+}
+
+#[rstest]
+#[case::sat_4_2_bit_mostly_all_diff("SAT-4-2-bit-mostly-all-diff")]
+#[case::sat_10_9_mostly_bit_all_diff("SAT-10-9-bit-mostly-all-diff-one-hot")]
+#[case::unsat_12_11_bit_all_one_hot("UNSAT-12-11-bit-all-diff-one-hot")]
+fn test_phase_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
+    run_cfg(
+        config,
+        test_stem,
+        test_stem,
+        LiteralChoice::Phase,
+        ExpectStatus::Success,
+    )
+}
+
+#[rstest]
+#[case::sat_4_2_bit_mostly_all_diff("SAT-4-2-bit-mostly-all-diff")]
+#[case::sat_10_9_mostly_bit_all_diff("SAT-10-9-bit-mostly-all-diff-one-hot")]
+fn test_anti_phase_cfg(config: &TestConfig, #[case] test_stem: &str) -> anyhow::Result<()> {
+    let anti_phase_stem = format!("{test_stem}-true");
+    run_cfg(
+        config,
+        test_stem,
+        &anti_phase_stem,
+        LiteralChoice::AntiPhase,
         ExpectStatus::Success,
     )
 }

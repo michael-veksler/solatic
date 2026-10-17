@@ -2,8 +2,14 @@ use clap::{Args, ValueEnum};
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LiteralChoice {
-    /// Always choose a False assignment
+    /// Reuse the previous latest assignment to this variable
     #[default]
+    Phase,
+
+    /// Use the negation of the previous latest assignment to this variable
+    AntiPhase,
+
+    /// Always choose a False assignment
     False,
 
     /// Always choose a True assignment
