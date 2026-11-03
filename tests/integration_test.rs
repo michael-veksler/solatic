@@ -115,7 +115,7 @@ fn run_cfg(
             ..Default::default()
         },
         input_cnf.as_bytes(),
-        io::stdout(),
+        Box::new(io::stdout()),
     );
 
     match expect_status {

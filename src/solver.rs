@@ -430,6 +430,10 @@ impl Solver {
         }
     }
 
+    pub fn set_trace(&mut self, trace: Box<dyn std::io::Write>) {
+        self.trace = Some(trace);
+    }
+
     #[must_use]
     pub fn find_satisfiable_literal(&self, clause: ClauseAccessor, first_lit_index: usize) -> Option<usize> {
         self.clauses

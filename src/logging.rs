@@ -3,8 +3,9 @@
 macro_rules! __dprint_impl {
     ($printer:ident, $maybe_out:expr, $($tokens: tt)*) => {
         let mut maybe_out = $maybe_out.take();
-        if let Some(out) = maybe_out.as_deref_mut() {
-                let _ = $printer!(out, $($tokens)*);
+        if let Some(out) = maybe_out.as_mut() {
+            use ::std::io::Write as _; // bring in macros that support owned write
+            let _ = $printer!(out, $($tokens)*);
         }
         $maybe_out = maybe_out;
     }

@@ -10,7 +10,7 @@ use crate::{dprintln, dprintln_once};
 
 pub fn open(args: &SolverArgs, path: impl AsRef<Path>) -> Result<Solver> {
     let file = File::open(&path).with_context(|| format!("{}:", path.as_ref().display()))?;
-    from_reader(args, BufReader::new(file), std::io::stdout())
+    from_reader(args, BufReader::new(file), Box::new(std::io::stderr()))
 }
 
 /// The header of the DIMACS file
@@ -170,10 +170,12 @@ impl<'a> DimacsBuilder<'a> {
     }
 }
 
-pub fn from_reader<W>(args: &SolverArgs, reader: impl BufRead, mut tracer: W) -> Result<Solver>
-where
-    W: Write,
-{
+pub fn from_reader(args: &SolverArgs, reader: impl BufRead, mut tracer: Box<dyn std::io::Write>) -> Result<Solver> {
     let mut builder = DimacsBuilder::new(args, &mut tracer);
-    builder.read(reader)
+    let mut solver = builder.read(reader)?;
+
+    if args.verbose {
+        solver.set_trace(tracer);
+    }
+    Ok(solver)
 }
