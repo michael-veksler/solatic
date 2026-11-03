@@ -2,12 +2,14 @@
 #[macro_export]
 macro_rules! __dprint_impl {
     ($printer:ident, $maybe_out:expr, $($tokens: tt)*) => {
-        let mut maybe_out = $maybe_out.take();
-        if let Some(out) = maybe_out.as_mut() {
-            use ::std::io::Write as _; // bring in macros that support owned write
-            let _ = $printer!(out, $($tokens)*);
+        {
+            let mut maybe_out = $maybe_out.take();
+            if let Some(out) = maybe_out.as_mut() {
+                use ::std::io::Write as _; // bring in macros that support owned write
+                let _ = $printer!(out, $($tokens)*);
+            }
+            $maybe_out = maybe_out;
         }
-        $maybe_out = maybe_out;
     }
 }
 /// Debug print macro that prints only if the condition is true.
@@ -48,6 +50,7 @@ macro_rules! __dprint_once_impl {
         if let Some(out) = $maybe_out.as_mut() {
             static WAS_PRINTED: ::std::sync::atomic::AtomicBool = ::std::sync::atomic::AtomicBool::new(false);
             if !WAS_PRINTED.swap(true, ::std::sync::atomic::Ordering::Relaxed) {
+                use ::std::io::Write as _; // bring in macros that support owned write
                 let _ = $printer!(out, $($tokens)*);
             }
         }
