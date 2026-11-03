@@ -12,3 +12,4 @@ anyhow = "1.0"
 rstest = "0.26.1"
 clap = { version = "4.0", features = ["derive"] }
 indoc = "2"
+derivative = "2.2.0"

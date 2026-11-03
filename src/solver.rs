@@ -418,6 +418,7 @@ pub struct Solver {
     trail: Vec<Lit>,
     conflict_cache: ConflictInfo,
     var_base_idx: usize,
+    trace: Option<Box<dyn std::io::Write>>, // None = tracing disabled
 }
 
 impl Solver {
@@ -623,7 +624,7 @@ impl Solver {
         let depth = self.trail_lim.len();
         self.trail_lim.push(self.trail.len());
         self.set_literal(choice, NULL_CLAUSE);
-        dprint!(self.args.verbose, "{depth}:{} ", self.lit_as_str(choice));
+        dprint!(self.trace, "{depth}:{} ", self.lit_as_str(choice));
         Some(())
     }
 
@@ -694,7 +695,7 @@ impl Solver {
         let conflict_info = self.make_conflict_clause(conflicting_clause);
         if conflict_info.frontier.len() == 1 {
             let uip_lit = conflict_info.frontier[0];
-            dprintln!(self.args.verbose, "## BT 0:{} ", self.lit_as_str(uip_lit));
+            dprintln!(self.trace, "## BT 0:{} ", self.lit_as_str(uip_lit));
             self.backjump(0);
             self.set_literal(uip_lit, NULL_CLAUSE);
             return Some(());
@@ -704,7 +705,7 @@ impl Solver {
 
         let latest_non_uip_lit = conflict_info.frontier[conflict_info.latest_non_uip];
         dprintln!(
-            self.args.verbose,
+            self.trace,
             "## BT -> {}:{}",
             conflict_info.latest_non_uip_level,
             self.lit_as_str(conflict_info.frontier[0])

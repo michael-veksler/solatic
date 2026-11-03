@@ -5,6 +5,7 @@ use solatic::solver::Solver;
 use solatic::LiteralChoice;
 use solatic::SolverArgs;
 use std::fs;
+use std::io;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone)]
@@ -114,6 +115,7 @@ fn run_cfg(
             ..Default::default()
         },
         input_cnf.as_bytes(),
+        io::stdout(),
     );
 
     match expect_status {
