@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use derivative::Derivative;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{stderr, BufRead, BufReader, Write};
 use std::path::Path;
 
 use crate::args::SolverArgs;
@@ -10,7 +9,7 @@ use crate::{dprintln, dprintln_once};
 
 pub fn open(args: &SolverArgs, path: impl AsRef<Path>) -> Result<Solver> {
     let file = File::open(&path).with_context(|| format!("{}:", path.as_ref().display()))?;
-    from_reader(args, BufReader::new(file), Box::new(std::io::stderr()))
+    from_reader(args, BufReader::new(file), Box::new(stderr()))
 }
 
 /// The header of the DIMACS file
@@ -20,29 +19,25 @@ struct CnfProblemLine {
     num_clauses: usize,
 }
 
-#[derive(Derivative)]
-#[derivative(Default)]
-struct DimacsBuilder<'a> {
+#[derive(Default)]
+struct DimacsBuilder {
     args: SolverArgs,
     problem_line: CnfProblemLine,
     actual_problem: CnfProblemLine,
     lineno: usize,
     lits: Vec<Lit>,
-    #[derivative(Default(bound = ""))]
-    maybe_tracer: Option<&'a mut dyn Write>,
 }
 
-impl<'a> DimacsBuilder<'a> {
-    fn new<W: Write>(args: &SolverArgs, tracer: &'a mut W) -> Self {
+impl DimacsBuilder {
+    fn new(args: &SolverArgs) -> Self {
         Self {
             args: *args,
-            maybe_tracer: args.verbose.then_some(tracer),
             ..Self::default()
         }
     }
 
     /// Eat up the comment and empty lines up to the header, then return the header.
-    fn read_problem_line<I>(&mut self, mut lines: I) -> Result<()>
+    fn read_problem_line<I>(&mut self, mut lines: I, tracer: &mut Option<Box<dyn Write>>) -> Result<()>
     where
         I: Iterator<Item = Result<String, std::io::Error>>,
     {
@@ -55,7 +50,7 @@ impl<'a> DimacsBuilder<'a> {
             let line = line.trim();
             if line.starts_with('c') {
                 dprintln_once!(
-                    self.maybe_tracer,
+                    *tracer,
                     "{}: Comment line should not start with a whitespace {line:?}",
                     self.lineno
                 );
@@ -99,11 +94,11 @@ impl<'a> DimacsBuilder<'a> {
         Ok(())
     }
 
-    pub fn read(&mut self, reader: impl BufRead) -> Result<Solver> {
-        let mut solver = Solver::new(&self.args, 1);
+    pub fn read(&mut self, reader: impl BufRead, tracer: Box<dyn Write>) -> Result<Solver> {
+        let mut solver = Solver::new(&self.args, 1, tracer);
 
         let mut read_iter = reader.lines();
-        self.read_problem_line(read_iter.by_ref())?;
+        self.read_problem_line(read_iter.by_ref(), solver.get_trace())?;
 
         for line_maybe in &mut read_iter {
             self.lineno += 1;
@@ -112,7 +107,7 @@ impl<'a> DimacsBuilder<'a> {
         }
         if !self.lits.is_empty() {
             dprintln!(
-                self.maybe_tracer,
+                *solver.get_trace(),
                 "{}: WARNING: Last clause lacks terminating 0",
                 self.lineno
             );
@@ -121,7 +116,7 @@ impl<'a> DimacsBuilder<'a> {
         }
         if self.problem_line.num_clauses != self.actual_problem.num_clauses {
             dprintln!(
-                self.maybe_tracer,
+                *solver.get_trace(),
                 "WARNING: Expected {} clauses but found {}",
                 self.problem_line.num_clauses,
                 self.actual_problem.num_clauses
@@ -129,7 +124,7 @@ impl<'a> DimacsBuilder<'a> {
         }
         if self.problem_line.num_vars != self.actual_problem.num_vars {
             dprintln!(
-                self.maybe_tracer,
+                *solver.get_trace(),
                 "{}: WARNING: Expected {} variables, found {}",
                 self.lineno,
                 self.problem_line.num_vars,
@@ -146,7 +141,7 @@ impl<'a> DimacsBuilder<'a> {
         }
         if line.starts_with("c") {
             dprintln_once!(
-                self.maybe_tracer,
+                *solver.get_trace(),
                 "{}: WARNING: nonstandard comments after the beginning of the file",
                 self.lineno
             );
@@ -170,12 +165,7 @@ impl<'a> DimacsBuilder<'a> {
     }
 }
 
-pub fn from_reader(args: &SolverArgs, reader: impl BufRead, mut tracer: Box<dyn std::io::Write>) -> Result<Solver> {
-    let mut builder = DimacsBuilder::new(args, &mut tracer);
-    let mut solver = builder.read(reader)?;
-
-    if args.verbose {
-        solver.set_trace(tracer);
-    }
-    Ok(solver)
+pub fn from_reader(args: &SolverArgs, reader: impl BufRead, tracer: Box<dyn std::io::Write>) -> Result<Solver> {
+    let mut builder = DimacsBuilder::new(args);
+    builder.read(reader, tracer)
 }

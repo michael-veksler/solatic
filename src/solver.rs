@@ -422,16 +422,17 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new(args: &SolverArgs, var_base_idx: usize) -> Self {
+    pub fn new(args: &SolverArgs, var_base_idx: usize, trace: Box<dyn std::io::Write>) -> Self {
         Self {
             args: *args,
             var_base_idx,
+            trace: args.verbose.then_some(trace),
             ..Self::default()
         }
     }
 
-    pub fn set_trace(&mut self, trace: Box<dyn std::io::Write>) {
-        self.trace = Some(trace);
+    pub fn get_trace(&mut self) -> &mut Option<Box<dyn std::io::Write>> {
+        &mut self.trace
     }
 
     #[must_use]
