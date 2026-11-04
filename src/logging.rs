@@ -3,6 +3,11 @@
 macro_rules! __dprint_impl {
     ($printer:ident, $maybe_out:expr, $($tokens: tt)*) => {
         {
+            // Why we use take() to overcome the borrow checker for dprint!(self.out, "{}", self.val):
+            //   1. We pass $self.out as $maybe_out, which is a mutable borrow of self.
+            //      accessing $self.val requires an immutable borrow of self, which is verboten.
+            //   2. Why not format_args!: same issue, it needs both mutable and immutable borrows of self. needs an immutable reference to self.val, i.e., to immutable reference of self,
+            //   3. Why not format!: we want to avoid the cost of heap allocation.
             let mut maybe_out = $maybe_out.take();
             if let Some(out) = maybe_out.as_mut() {
                 use ::std::io::Write as _; // bring in macros that support owned write
