@@ -1,10 +1,12 @@
+use std::io::stderr;
+
 use anyhow::anyhow;
 use solatic::SolverArgs;
 use solatic::{to_lits, Lit, SolveResult, Solver};
 
 #[test]
 fn smoke_test() -> anyhow::Result<()> {
-    let mut solver = Solver::new(&SolverArgs::default(), 1);
+    let mut solver = Solver::new(&SolverArgs::default(), 1, Box::new(stderr()));
     solver
         .add_clause(&to_lits(&[1, -2, 3]))
         .ok_or_else(|| anyhow!("unexpected"))?;
@@ -50,7 +52,7 @@ fn nontrivial_sat() -> anyhow::Result<()> {
 
 #[test]
 fn conflict_is_unsat() -> anyhow::Result<()> {
-    let mut solver = Solver::new(&SolverArgs::default(), 1);
+    let mut solver = Solver::new(&SolverArgs::default(), 1, Box::new(stderr()));
     let unexpected = || anyhow!("unexpected");
 
     // first we create mutual implication v1 -> !v2 -> v3 -> v1
@@ -71,7 +73,7 @@ fn conflict_is_unsat() -> anyhow::Result<()> {
 
 #[test]
 fn repeated_literals() -> anyhow::Result<()> {
-    let mut solver = Solver::new(&SolverArgs::default(), 1);
+    let mut solver = Solver::new(&SolverArgs::default(), 1, Box::new(stderr()));
     let unexpected = || anyhow!("unexpected");
     solver.add_clause(&to_lits(&[-1, -1, -1])).ok_or_else(unexpected)?;
     solver.add_clause(&to_lits(&[2, -1])).ok_or_else(unexpected)?;
