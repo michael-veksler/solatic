@@ -1,14 +1,16 @@
 use indoc::indoc;
 use solatic::{dprint, dprint_once, dprintln, dprintln_once};
+use std::io;
 use std::process::Command;
 
 #[test]
 fn dprint_dprintln_output() {
     for i in 0..=4 {
-        dprintln!(i % 2 == 0, "{index}: named placeholder", index = i);
-        dprintln!(i % 2 == 0, "{i}: inplace");
-        dprint!(i % 2 == 0, "{}: ", i);
-        dprintln!(i % 2 == 0, "unnamed placeholder");
+        let mut maybe_stderr: Option<&mut dyn io::Write> = if i % 2 == 0 { Some(&mut io::stderr()) } else { None };
+        dprintln!(maybe_stderr, "{index}: named placeholder", index = i);
+        dprintln!(maybe_stderr, "{i}: inplace");
+        dprint!(maybe_stderr, "{}: ", i);
+        dprintln!(maybe_stderr, "unnamed placeholder");
     }
 }
 
@@ -40,10 +42,11 @@ fn dprint_dprintln_validate() {
 #[test]
 fn dprint_dprintln_once_output() {
     for i in 0..=4 {
-        dprintln_once!(i % 2 == 0, "{index}: named placeholder", index = i);
-        dprintln_once!(i % 2 == 0, "{i}: inplace");
-        dprint_once!(i % 2 == 0, "{}: ", i);
-        dprintln_once!(i % 2 == 0, "unnamed placeholder");
+        let mut maybe_stderr: Option<&mut dyn io::Write> = if i % 2 == 0 { Some(&mut io::stderr()) } else { None };
+        dprintln_once!(maybe_stderr, "{index}: named placeholder", index = i);
+        dprintln_once!(maybe_stderr, "{i}: inplace");
+        dprint_once!(maybe_stderr, "{}: ", i);
+        dprintln_once!(maybe_stderr, "unnamed placeholder");
     }
 }
 
